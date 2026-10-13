@@ -1,0 +1,40 @@
+{
+  "erpInvoiceNo": "0090000001",
+  "sellerNtn": "0786909",
+  "callbackRef": "1000/2025",
+  "invoice": {
+    "invoiceType": "Sale Invoice",
+    "invoiceDate": "2025-04-21",
+    "sellerNTNCNIC": "0786909",
+    "sellerBusinessName": "Company 8",
+    "sellerProvince": "Sindh",
+    "sellerAddress": "Karachi",
+    "buyerNTNCNIC": "1000000000000",
+    "buyerBusinessName": "FERTILIZER MANUFAC IRS NEW",
+    "buyerProvince": "Sindh",
+    "buyerAddress": "Karachi",
+    "buyerRegistrationType": "Unregistered",
+    "invoiceRefNo": "",
+    "items": [
+      {
+        "hsCode": "0101.2100",
+        "productDescription": "product Description",
+        "rate": "18%",
+        "uoM": "Numbers, pieces, units",
+        "quantity": 1.0000,
+        "totalValues": 0.00,
+        "valueSalesExcludingST": 1000.00,
+        "fixedNotifiedValueOrRetailPrice": 0.00,
+        "salesTaxApplicable": 180.00,
+        "salesTaxWithheldAtSource": 0.00,
+        "extraTax": 0.00,
+        "furtherTax": 120.00,
+        "sroScheduleNo": "SRO123",
+        "fedPayable": 0.00,
+        "discount": 0.00,
+        "saleType": "Goods at standard rate (default)",
+        "sroItemSerialNo": ""
+      }
+    ]
+  }
+}

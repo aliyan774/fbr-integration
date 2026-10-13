@@ -1,0 +1,37 @@
+{
+  "trackingId": "e9895805-4b54-4ec6-8b6a-8311b66fbe08",
+  "environment": "dev",
+  "erpInvoiceNo": "0090000001",
+  "sellerNtn": "0786909",
+  "callbackRef": "1000/2025",
+  "status": "SUBMITTED",
+  "replayed": false,
+  "fbrInvoiceNo": "0786909DI1791922500470",
+  "dated": "2026-10-14 01:15:00",
+  "pralHttpStatus": 200,
+  "pralResponse": {
+    "invoiceNumber": "0786909DI1791922500470",
+    "dated": "2026-10-14 01:15:00",
+    "validationResponse": {
+      "statusCode": "00",
+      "status": "Valid",
+      "error": "",
+      "invoiceStatuses": [
+        {
+          "itemSNo": "1",
+          "statusCode": "00",
+          "status": "Valid",
+          "errorCode": "",
+          "error": "",
+          "invoiceNo": "0786909DI1791922500470-1"
+        }
+      ]
+    }
+  },
+  "localErrors": [],
+  "errorDescriptions": [],
+  "attempts": 2,
+  "receivedAt": "2026-10-13T20:15:00.016823Z",
+  "completedAt": "2026-10-13T20:15:00.062818Z",
+  "elapsedMs": 45
+}

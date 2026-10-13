@@ -1,0 +1,247 @@
+{
+  "info": {
+    "name": "FBR Digital Invoicing API v1.12",
+    "description": "Validate and Post Invoice endpoints from PRAL's Technical Specification for DI API v1.12, with the sample values from the document.\n\nSet the `token` variable to the Bearer token issued by PRAL.\n\nSuccess rule: HTTP 200 AND validationResponse.statusCode == \"00\" AND every invoiceStatuses[].statusCode == \"00\". Validation failures still return HTTP 200.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      { "key": "token", "value": "{{token}}", "type": "string" }
+    ]
+  },
+  "variable": [
+    { "key": "token", "value": "", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "Sandbox",
+      "description": "Spec sections 4.1.1 and 4.2.1. Sandbox requires scenarioId (SN001..SN028).",
+      "item": [
+        {
+          "name": "1. Validate Invoice (Sandbox)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "https://gw.fbr.gov.pk/di_data/v1/di/validateinvoicedata_sb",
+              "protocol": "https",
+              "host": ["gw", "fbr", "gov", "pk"],
+              "path": ["di_data", "v1", "di", "validateinvoicedata_sb"]
+            },
+            "description": "Validates the invoice without issuing an FBR invoice number.",
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"invoiceType\": \"Sale Invoice\",\n  \"invoiceDate\": \"2025-04-21\",\n  \"sellerNTNCNIC\": \"0786909\",\n  \"sellerBusinessName\": \"Company 8\",\n  \"sellerProvince\": \"Sindh\",\n  \"sellerAddress\": \"Karachi\",\n  \"buyerNTNCNIC\": \"1000000000000\",\n  \"buyerBusinessName\": \"FERTILIZER MANUFAC IRS NEW\",\n  \"buyerProvince\": \"Sindh\",\n  \"buyerAddress\": \"Karachi\",\n  \"buyerRegistrationType\": \"Registered\",\n  \"invoiceRefNo\": \"\",\n  \"scenarioId\": \"SN001\",\n  \"items\": [\n    {\n      \"hsCode\": \"0101.2100\",\n      \"productDescription\": \"product Description\",\n      \"rate\": \"18%\",\n      \"uoM\": \"Numbers, pieces, units\",\n      \"quantity\": 1.0000,\n      \"totalValues\": 0.00,\n      \"valueSalesExcludingST\": 1000.00,\n      \"fixedNotifiedValueOrRetailPrice\": 0.00,\n      \"salesTaxApplicable\": 180.00,\n      \"salesTaxWithheldAtSource\": 0.00,\n      \"extraTax\": 0.00,\n      \"furtherTax\": 120.00,\n      \"sroScheduleNo\": \"\",\n      \"fedPayable\": 0.00,\n      \"discount\": 0.00,\n      \"saleType\": \"Goods at standard rate (default)\",\n      \"sroItemSerialNo\": \"\"\n    }\n  ]\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const vr = (pm.response.json().validationResponse) || {};",
+                  "const items = vr.invoiceStatuses || [];",
+                  "pm.test('Header statusCode is 00', () => pm.expect(vr.statusCode, `header error ${vr.errorCode}: ${vr.error}`).to.eql('00'));",
+                  "pm.test('Every item statusCode is 00', () => {",
+                  "    const failed = items.filter(i => i.statusCode !== '00').map(i => `item ${i.itemSNo}: ${i.errorCode} ${i.error}`);",
+                  "    pm.expect(failed, failed.join(' | ')).to.be.empty;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": [
+            {
+              "name": "Valid",
+              "originalRequest": { "method": "POST", "url": { "raw": "https://gw.fbr.gov.pk/di_data/v1/di/validateinvoicedata_sb" } },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"dated\": \"2025-05-13 13:13:07\",\n  \"validationResponse\": {\n    \"statusCode\": \"00\",\n    \"status\": \"Valid\",\n    \"errorCode\": null,\n    \"error\": \"\",\n    \"invoiceStatuses\": [\n      {\n        \"itemSNo\": \"1\",\n        \"statusCode\": \"00\",\n        \"status\": \"Valid\",\n        \"errorCode\": null,\n        \"error\": \"\"\n      }\n    ]\n  }\n}"
+            },
+            {
+              "name": "Invalid",
+              "originalRequest": { "method": "POST", "url": { "raw": "https://gw.fbr.gov.pk/di_data/v1/di/validateinvoicedata_sb" } },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"dated\": \"2025-05-13 13:13:54\",\n  \"validationResponse\": {\n    \"statusCode\": \"00\",\n    \"status\": \"Invalid\",\n    \"errorCode\": null,\n    \"error\": \"\",\n    \"invoiceStatuses\": [\n      {\n        \"itemSNo\": \"1\",\n        \"statusCode\": \"01\",\n        \"status\": \"Invalid\",\n        \"errorCode\": \"0046\",\n        \"error\": \"Provide rate.\"\n      }\n    ]\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "2. Post Invoice (Sandbox)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "https://gw.fbr.gov.pk/di_data/v1/di/postinvoicedata_sb",
+              "protocol": "https",
+              "host": ["gw", "fbr", "gov", "pk"],
+              "path": ["di_data", "v1", "di", "postinvoicedata_sb"]
+            },
+            "description": "Submits the invoice and returns an FBR invoice number on success. The number is saved to the `lastInvoiceNumber` collection variable.",
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"invoiceType\": \"Sale Invoice\",\n  \"invoiceDate\": \"2025-04-21\",\n  \"sellerNTNCNIC\": \"0786909\",\n  \"sellerBusinessName\": \"Company 8\",\n  \"sellerProvince\": \"Sindh\",\n  \"sellerAddress\": \"Karachi\",\n  \"buyerNTNCNIC\": \"1000000000000\",\n  \"buyerBusinessName\": \"FERTILIZER MANUFAC IRS NEW\",\n  \"buyerProvince\": \"Sindh\",\n  \"buyerAddress\": \"Karachi\",\n  \"buyerRegistrationType\": \"Registered\",\n  \"invoiceRefNo\": \"\",\n  \"scenarioId\": \"SN001\",\n  \"items\": [\n    {\n      \"hsCode\": \"0101.2100\",\n      \"productDescription\": \"product Description\",\n      \"rate\": \"18%\",\n      \"uoM\": \"Numbers, pieces, units\",\n      \"quantity\": 1.0000,\n      \"totalValues\": 0.00,\n      \"valueSalesExcludingST\": 1000.00,\n      \"fixedNotifiedValueOrRetailPrice\": 0.00,\n      \"salesTaxApplicable\": 180.00,\n      \"salesTaxWithheldAtSource\": 0.00,\n      \"extraTax\": 0.00,\n      \"furtherTax\": 120.00,\n      \"sroScheduleNo\": \"\",\n      \"fedPayable\": 0.00,\n      \"discount\": 0.00,\n      \"saleType\": \"Goods at standard rate (default)\",\n      \"sroItemSerialNo\": \"\"\n    }\n  ]\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "const vr = body.validationResponse || {};",
+                  "const items = vr.invoiceStatuses || [];",
+                  "pm.test('Header statusCode is 00', () => pm.expect(vr.statusCode, `header error ${vr.errorCode}: ${vr.error}`).to.eql('00'));",
+                  "pm.test('Every item statusCode is 00', () => {",
+                  "    const failed = items.filter(i => i.statusCode !== '00').map(i => `item ${i.itemSNo}: ${i.errorCode} ${i.error}`);",
+                  "    pm.expect(failed, failed.join(' | ')).to.be.empty;",
+                  "});",
+                  "pm.test('FBR invoiceNumber returned', () => pm.expect(body.invoiceNumber).to.be.a('string').and.not.empty);",
+                  "if (body.invoiceNumber) { pm.collectionVariables.set('lastInvoiceNumber', body.invoiceNumber); console.log('FBR invoice number:', body.invoiceNumber); }"
+                ]
+              }
+            }
+          ],
+          "response": [
+            {
+              "name": "Valid",
+              "originalRequest": { "method": "POST", "url": { "raw": "https://gw.fbr.gov.pk/di_data/v1/di/postinvoicedata_sb" } },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"invoiceNumber\": \"7000007DI1747119701593\",\n  \"dated\": \"2025-05-13 12:01:41\",\n  \"validationResponse\": {\n    \"statusCode\": \"00\",\n    \"status\": \"Valid\",\n    \"error\": \"\",\n    \"invoiceStatuses\": [\n      {\n        \"itemSNo\": \"1\",\n        \"statusCode\": \"00\",\n        \"status\": \"Valid\",\n        \"invoiceNo\": \"7000007DI1747119701593-1\",\n        \"errorCode\": \"\",\n        \"error\": \"\"\n      }\n    ]\n  }\n}"
+            },
+            {
+              "name": "Invalid (header-level)",
+              "originalRequest": { "method": "POST", "url": { "raw": "https://gw.fbr.gov.pk/di_data/v1/di/postinvoicedata_sb" } },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"dated\": \"2025-05-13 13:09:05\",\n  \"validationResponse\": {\n    \"statusCode\": \"01\",\n    \"status\": \"Invalid\",\n    \"errorCode\": \"0052\",\n    \"error\": \"Provide proper HS Code with invoice no. null\",\n    \"invoiceStatuses\": null\n  }\n}"
+            },
+            {
+              "name": "Invalid (item-level)",
+              "originalRequest": { "method": "POST", "url": { "raw": "https://gw.fbr.gov.pk/di_data/v1/di/postinvoicedata_sb" } },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"dated\": \"2025-05-13 13:10:00\",\n  \"validationResponse\": {\n    \"statusCode\": \"00\",\n    \"status\": \"invalid\",\n    \"error\": \"\",\n    \"invoiceStatuses\": [\n      {\n        \"itemSNo\": \"1\",\n        \"statusCode\": \"01\",\n        \"status\": \"Invalid\",\n        \"invoiceNo\": null,\n        \"errorCode\": \"0046\",\n        \"error\": \"Provide rate.\"\n      }\n    ]\n  }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Production",
+      "description": "Spec sections 4.1.2 and 4.2.2. No scenarioId in production. Sample uses an Unregistered buyer and sroScheduleNo \"SRO123\" exactly as printed in the document.",
+      "item": [
+        {
+          "name": "1. Validate Invoice (Production)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "https://gw.fbr.gov.pk/di_data/v1/di/validateinvoicedata",
+              "protocol": "https",
+              "host": ["gw", "fbr", "gov", "pk"],
+              "path": ["di_data", "v1", "di", "validateinvoicedata"]
+            },
+            "description": "Validates the invoice without issuing an FBR invoice number.",
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"invoiceType\": \"Sale Invoice\",\n  \"invoiceDate\": \"2025-04-21\",\n  \"sellerNTNCNIC\": \"0786909\",\n  \"sellerBusinessName\": \"Company 8\",\n  \"sellerProvince\": \"Sindh\",\n  \"sellerAddress\": \"Karachi\",\n  \"buyerNTNCNIC\": \"1000000000000\",\n  \"buyerBusinessName\": \"FERTILIZER MANUFAC IRS NEW\",\n  \"buyerProvince\": \"Sindh\",\n  \"buyerAddress\": \"Karachi\",\n  \"buyerRegistrationType\": \"Unregistered\",\n  \"invoiceRefNo\": \"\",\n  \"items\": [\n    {\n      \"hsCode\": \"0101.2100\",\n      \"productDescription\": \"product Description\",\n      \"rate\": \"18%\",\n      \"uoM\": \"Numbers, pieces, units\",\n      \"quantity\": 1.0000,\n      \"totalValues\": 0.00,\n      \"valueSalesExcludingST\": 1000.00,\n      \"fixedNotifiedValueOrRetailPrice\": 0.00,\n      \"salesTaxApplicable\": 180.00,\n      \"salesTaxWithheldAtSource\": 0.00,\n      \"extraTax\": 0.00,\n      \"furtherTax\": 120.00,\n      \"sroScheduleNo\": \"SRO123\",\n      \"fedPayable\": 0.00,\n      \"discount\": 0.00,\n      \"saleType\": \"Goods at standard rate (default)\",\n      \"sroItemSerialNo\": \"\"\n    }\n  ]\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const vr = (pm.response.json().validationResponse) || {};",
+                  "const items = vr.invoiceStatuses || [];",
+                  "pm.test('Header statusCode is 00', () => pm.expect(vr.statusCode, `header error ${vr.errorCode}: ${vr.error}`).to.eql('00'));",
+                  "pm.test('Every item statusCode is 00', () => {",
+                  "    const failed = items.filter(i => i.statusCode !== '00').map(i => `item ${i.itemSNo}: ${i.errorCode} ${i.error}`);",
+                  "    pm.expect(failed, failed.join(' | ')).to.be.empty;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "2. Post Invoice (Production)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "https://gw.fbr.gov.pk/di_data/v1/di/postinvoicedata",
+              "protocol": "https",
+              "host": ["gw", "fbr", "gov", "pk"],
+              "path": ["di_data", "v1", "di", "postinvoicedata"]
+            },
+            "description": "Submits the invoice and returns an FBR invoice number on success. The number is saved to the `lastInvoiceNumber` collection variable.",
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"invoiceType\": \"Sale Invoice\",\n  \"invoiceDate\": \"2025-04-21\",\n  \"sellerNTNCNIC\": \"0786909\",\n  \"sellerBusinessName\": \"Company 8\",\n  \"sellerProvince\": \"Sindh\",\n  \"sellerAddress\": \"Karachi\",\n  \"buyerNTNCNIC\": \"1000000000000\",\n  \"buyerBusinessName\": \"FERTILIZER MANUFAC IRS NEW\",\n  \"buyerProvince\": \"Sindh\",\n  \"buyerAddress\": \"Karachi\",\n  \"buyerRegistrationType\": \"Unregistered\",\n  \"invoiceRefNo\": \"\",\n  \"items\": [\n    {\n      \"hsCode\": \"0101.2100\",\n      \"productDescription\": \"product Description\",\n      \"rate\": \"18%\",\n      \"uoM\": \"Numbers, pieces, units\",\n      \"quantity\": 1.0000,\n      \"totalValues\": 0.00,\n      \"valueSalesExcludingST\": 1000.00,\n      \"fixedNotifiedValueOrRetailPrice\": 0.00,\n      \"salesTaxApplicable\": 180.00,\n      \"salesTaxWithheldAtSource\": 0.00,\n      \"extraTax\": 0.00,\n      \"furtherTax\": 120.00,\n      \"sroScheduleNo\": \"SRO123\",\n      \"fedPayable\": 0.00,\n      \"discount\": 0.00,\n      \"saleType\": \"Goods at standard rate (default)\",\n      \"sroItemSerialNo\": \"\"\n    }\n  ]\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "const vr = body.validationResponse || {};",
+                  "const items = vr.invoiceStatuses || [];",
+                  "pm.test('Header statusCode is 00', () => pm.expect(vr.statusCode, `header error ${vr.errorCode}: ${vr.error}`).to.eql('00'));",
+                  "pm.test('Every item statusCode is 00', () => {",
+                  "    const failed = items.filter(i => i.statusCode !== '00').map(i => `item ${i.itemSNo}: ${i.errorCode} ${i.error}`);",
+                  "    pm.expect(failed, failed.join(' | ')).to.be.empty;",
+                  "});",
+                  "pm.test('FBR invoiceNumber returned', () => pm.expect(body.invoiceNumber).to.be.a('string').and.not.empty);",
+                  "if (body.invoiceNumber) { pm.collectionVariables.set('lastInvoiceNumber', body.invoiceNumber); console.log('FBR invoice number:', body.invoiceNumber); }"
+                ]
+              }
+            }
+          ],
+          "response": []
+        }
+      ]
+    }
+  ]
+}

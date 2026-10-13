@@ -1,0 +1,1094 @@
+{
+  "info": {
+    "name": "FBR Middleware (SAP -> PRAL)",
+    "description": "Calls to the FastAPI middleware that sits between SAP and PRAL Digital Invoicing.\n\nSet the collection variables: `baseUrl`, `apiKey`, `devToken` (sandbox PRAL token), `prdToken` (production PRAL token), `erpInvoiceNo`. Against the local mock PRAL any token except `bad` works.\n\n## Request\n\n`POST {{baseUrl}}/api/v1/{env}/invoices` where `env` is `dev` (PRAL sandbox) or `prd` (PRAL production).\n\nHeaders (both required, 401 otherwise):\n\n| Header | Value |\n|---|---|\n| `X-API-Key` | key issued by the middleware (`MIDDLEWARE_API_KEYS`) |\n| `Authorization` | `Bearer <PRAL token>` for the chosen environment (ABAP reads it from ZFBR_TOKEN by SELLER_NTN + ENV) |\n\nBody (envelope):\n\n| Field | Type | Required | Rule |\n|---|---|---|---|\n| `erpInvoiceNo` | string 1-50 | yes | SAP billing document; idempotency key per environment |\n| `sellerNtn` | string | yes | 7-digit NTN or 13-digit CNIC; must equal `invoice.sellerNTNCNIC` |\n| `callbackRef` | string <=100 | no | echoed back unchanged |\n| `invoice` | object | yes | PRAL payload (header + items), see the sample body |\n\nConditional rules enforced before anything is stored (422 with `detail[].field`):\n`buyerNTNCNIC` required when `buyerRegistrationType` is `Registered` and must differ from the seller;\n`invoiceRefNo` required (22 or 28 chars) for `Debit Note`, must be empty for `Sale Invoice`;\n`scenarioId` (SN001..SN028) required on `dev`, ignored/stripped on `prd`;\n`hsCode` matches `^\\d{4}\\.\\d{4}$`; `quantity` > 0; money fields >= 0 with 2 decimals;\n`salesTaxWithheldAtSource` is 0 or equal to `salesTaxApplicable`; `invoiceDate` is YYYY-MM-DD and not in the future.\nUnknown keys are rejected.\n\n## Response\n\nEnvelope with `status` -> HTTP: SUBMITTED 201, replayed 200, REJECTED_LOCAL / REJECTED_FBR 422,\nFAILED_UPSTREAM / AUTH_ERROR 502, UNKNOWN 504. `pralResponse` is PRAL's body verbatim; `errorDescriptions`\nexplains each PRAL `errorCode`. `X-Tracking-Id` header = `trackingId`.\n",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8000",
+      "type": "string"
+    },
+    {
+      "key": "apiKey",
+      "value": "change-me-sap-dev",
+      "type": "string"
+    },
+    {
+      "key": "devToken",
+      "value": "sandbox-token-from-ZFBR_TOKEN",
+      "type": "string"
+    },
+    {
+      "key": "prdToken",
+      "value": "production-token-from-ZFBR_TOKEN",
+      "type": "string"
+    },
+    {
+      "key": "erpInvoiceNo",
+      "value": "0090000001",
+      "type": "string"
+    },
+    {
+      "key": "lastTrackingId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "lastFbrInvoiceNo",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/health",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "health"
+          ]
+        },
+        "description": "Liveness, DB check, in-flight count and the PRAL URLs behind /api/v1/dev and /api/v1/prd. No auth."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "pm.test('db ok', () => pm.expect(pm.response.json().db).to.eql('ok'));",
+              "pm.test('dev and prd listed', () => pm.expect(pm.response.json().environments).to.have.keys('dev','prd'));"
+            ]
+          }
+        }
+      ],
+      "response": []
+    },
+    {
+      "name": "dev (PRAL sandbox)",
+      "description": "Routes to validateinvoicedata_sb / postinvoicedata_sb. scenarioId is required. Uses {{devToken}}.",
+      "item": [
+        {
+          "name": "1. Submit sale invoice",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "Middleware API key (MIDDLEWARE_API_KEYS)"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{devToken}}",
+                "description": "PRAL Bearer token for this environment, from ZFBR_TOKEN"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/dev/invoices",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "dev",
+                "invoices"
+              ]
+            },
+            "description": "Spec sample sale invoice (SN001). First call: 201 SUBMITTED. Same erpInvoiceNo again: 200 replayed=true.",
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"erpInvoiceNo\": \"{{erpInvoiceNo}}\",\n  \"sellerNtn\": \"0786909\",\n  \"callbackRef\": \"1000/2025\",\n  \"invoice\": {\n    \"invoiceType\": \"Sale Invoice\",\n    \"invoiceDate\": \"2025-04-21\",\n    \"sellerNTNCNIC\": \"0786909\",\n    \"sellerBusinessName\": \"Company 8\",\n    \"sellerProvince\": \"Sindh\",\n    \"sellerAddress\": \"Karachi\",\n    \"buyerNTNCNIC\": \"1000000000000\",\n    \"buyerBusinessName\": \"FERTILIZER MANUFAC IRS NEW\",\n    \"buyerProvince\": \"Sindh\",\n    \"buyerAddress\": \"Karachi\",\n    \"buyerRegistrationType\": \"Registered\",\n    \"invoiceRefNo\": \"\",\n    \"scenarioId\": \"SN001\",\n    \"items\": [\n      {\n        \"hsCode\": \"0101.2100\",\n        \"productDescription\": \"product Description\",\n        \"rate\": \"18%\",\n        \"uoM\": \"Numbers, pieces, units\",\n        \"quantity\": 1.0,\n        \"totalValues\": 0.0,\n        \"valueSalesExcludingST\": 1000.0,\n        \"fixedNotifiedValueOrRetailPrice\": 0.0,\n        \"salesTaxApplicable\": 180.0,\n        \"salesTaxWithheldAtSource\": 0.0,\n        \"extraTax\": 0.0,\n        \"furtherTax\": 120.0,\n        \"sroScheduleNo\": \"\",\n        \"fedPayable\": 0.0,\n        \"discount\": 0.0,\n        \"saleType\": \"Goods at standard rate (default)\",\n        \"sroItemSerialNo\": \"\"\n      }\n    ]\n  }\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201 (fresh) or 200 (replayed)', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "pm.test('status SUBMITTED', () => pm.expect(pm.response.json().status).to.eql('SUBMITTED'));",
+                  "pm.test('environment dev', () => pm.expect(pm.response.json().environment).to.eql('dev'));",
+                  "pm.test('fbrInvoiceNo set', () => pm.expect(pm.response.json().fbrInvoiceNo).to.be.a('string').and.not.empty);",
+                  "pm.test('PRAL header and item status 00', () => {",
+                  "  const vr = pm.response.json().pralResponse.validationResponse;",
+                  "  pm.expect(vr.statusCode).to.eql('00');",
+                  "  (vr.invoiceStatuses || []).forEach(s => pm.expect(s.statusCode).to.eql('00'));",
+                  "});",
+                  "const b = pm.response.json();",
+                  "pm.test('X-Tracking-Id header equals trackingId', () => pm.expect(pm.response.headers.get('X-Tracking-Id')).to.eql(b.trackingId));",
+                  "pm.test('envelope has every documented field', () => {",
+                  "  ['trackingId','environment','erpInvoiceNo','sellerNtn','callbackRef','status','replayed','fbrInvoiceNo','dated',",
+                  "   'pralHttpStatus','pralResponse','localErrors','errorDescriptions','attempts','receivedAt','completedAt','elapsedMs']",
+                  "   .forEach(k => pm.expect(b, k).to.have.property(k));",
+                  "});",
+                  "pm.collectionVariables.set('lastTrackingId', b.trackingId);",
+                  "if (b.fbrInvoiceNo) pm.collectionVariables.set('lastFbrInvoiceNo', b.fbrInvoiceNo);"
+                ]
+              }
+            }
+          ],
+          "response": [
+            {
+              "name": "201 SUBMITTED",
+              "originalRequest": {
+                "method": "POST",
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/dev/invoices",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "dev",
+                    "invoices"
+                  ]
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"trackingId\": \"e9895805-4b54-4ec6-8b6a-8311b66fbe08\",\n  \"environment\": \"dev\",\n  \"erpInvoiceNo\": \"0090000001\",\n  \"sellerNtn\": \"0786909\",\n  \"callbackRef\": \"1000/2025\",\n  \"status\": \"SUBMITTED\",\n  \"replayed\": false,\n  \"fbrInvoiceNo\": \"0786909DI1791922500470\",\n  \"dated\": \"2026-10-14 01:15:00\",\n  \"pralHttpStatus\": 200,\n  \"pralResponse\": {\n    \"invoiceNumber\": \"0786909DI1791922500470\",\n    \"dated\": \"2026-10-14 01:15:00\",\n    \"validationResponse\": {\n      \"statusCode\": \"00\",\n      \"status\": \"Valid\",\n      \"error\": \"\",\n      \"invoiceStatuses\": [\n        {\n          \"itemSNo\": \"1\",\n          \"statusCode\": \"00\",\n          \"status\": \"Valid\",\n          \"errorCode\": \"\",\n          \"error\": \"\",\n          \"invoiceNo\": \"0786909DI1791922500470-1\"\n        }\n      ]\n    }\n  },\n  \"localErrors\": [],\n  \"errorDescriptions\": [],\n  \"attempts\": 2,\n  \"receivedAt\": \"2026-10-13T20:15:00.016823Z\",\n  \"completedAt\": \"2026-10-13T20:15:00.062818Z\",\n  \"elapsedMs\": 45\n}"
+            }
+          ]
+        },
+        {
+          "name": "2. Submit same invoice again (replay)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "Middleware API key (MIDDLEWARE_API_KEYS)"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{devToken}}",
+                "description": "PRAL Bearer token for this environment, from ZFBR_TOKEN"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/dev/invoices",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "dev",
+                "invoices"
+              ]
+            },
+            "description": "Idempotency: the stored result comes back with HTTP 200 and replayed=true; PRAL is not called.",
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"erpInvoiceNo\": \"{{erpInvoiceNo}}\",\n  \"sellerNtn\": \"0786909\",\n  \"callbackRef\": \"1000/2025\",\n  \"invoice\": {\n    \"invoiceType\": \"Sale Invoice\",\n    \"invoiceDate\": \"2025-04-21\",\n    \"sellerNTNCNIC\": \"0786909\",\n    \"sellerBusinessName\": \"Company 8\",\n    \"sellerProvince\": \"Sindh\",\n    \"sellerAddress\": \"Karachi\",\n    \"buyerNTNCNIC\": \"1000000000000\",\n    \"buyerBusinessName\": \"FERTILIZER MANUFAC IRS NEW\",\n    \"buyerProvince\": \"Sindh\",\n    \"buyerAddress\": \"Karachi\",\n    \"buyerRegistrationType\": \"Registered\",\n    \"invoiceRefNo\": \"\",\n    \"scenarioId\": \"SN001\",\n    \"items\": [\n      {\n        \"hsCode\": \"0101.2100\",\n        \"productDescription\": \"product Description\",\n        \"rate\": \"18%\",\n        \"uoM\": \"Numbers, pieces, units\",\n        \"quantity\": 1.0,\n        \"totalValues\": 0.0,\n        \"valueSalesExcludingST\": 1000.0,\n        \"fixedNotifiedValueOrRetailPrice\": 0.0,\n        \"salesTaxApplicable\": 180.0,\n        \"salesTaxWithheldAtSource\": 0.0,\n        \"extraTax\": 0.0,\n        \"furtherTax\": 120.0,\n        \"sroScheduleNo\": \"\",\n        \"fedPayable\": 0.0,\n        \"discount\": 0.0,\n        \"saleType\": \"Goods at standard rate (default)\",\n        \"sroItemSerialNo\": \"\"\n      }\n    ]\n  }\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('replayed', () => pm.expect(pm.response.json().replayed).to.eql(true));",
+                  "const b = pm.response.json();",
+                  "pm.test('X-Tracking-Id header equals trackingId', () => pm.expect(pm.response.headers.get('X-Tracking-Id')).to.eql(b.trackingId));",
+                  "pm.test('envelope has every documented field', () => {",
+                  "  ['trackingId','environment','erpInvoiceNo','sellerNtn','callbackRef','status','replayed','fbrInvoiceNo','dated',",
+                  "   'pralHttpStatus','pralResponse','localErrors','errorDescriptions','attempts','receivedAt','completedAt','elapsedMs']",
+                  "   .forEach(k => pm.expect(b, k).to.have.property(k));",
+                  "});",
+                  "pm.collectionVariables.set('lastTrackingId', b.trackingId);",
+                  "if (b.fbrInvoiceNo) pm.collectionVariables.set('lastFbrInvoiceNo', b.fbrInvoiceNo);"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "3. Lookup by erpInvoiceNo",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "Middleware API key (MIDDLEWARE_API_KEYS)"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/dev/invoices/{{erpInvoiceNo}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "dev",
+                "invoices",
+                "{{erpInvoiceNo}}"
+              ]
+            },
+            "description": "Stored envelope for an earlier submission (e.g. after an ABAP-side timeout). API key only. 404 if unknown."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('environment dev', () => pm.expect(pm.response.json().environment).to.eql('dev'));",
+                  "const b = pm.response.json();",
+                  "pm.test('X-Tracking-Id header equals trackingId', () => pm.expect(pm.response.headers.get('X-Tracking-Id')).to.eql(b.trackingId));",
+                  "pm.test('envelope has every documented field', () => {",
+                  "  ['trackingId','environment','erpInvoiceNo','sellerNtn','callbackRef','status','replayed','fbrInvoiceNo','dated',",
+                  "   'pralHttpStatus','pralResponse','localErrors','errorDescriptions','attempts','receivedAt','completedAt','elapsedMs']",
+                  "   .forEach(k => pm.expect(b, k).to.have.property(k));",
+                  "});",
+                  "pm.collectionVariables.set('lastTrackingId', b.trackingId);",
+                  "if (b.fbrInvoiceNo) pm.collectionVariables.set('lastFbrInvoiceNo', b.fbrInvoiceNo);"
+                ]
+              }
+            }
+          ],
+          "response": [
+            {
+              "name": "200 stored envelope",
+              "originalRequest": {
+                "method": "GET",
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/dev/invoices/0090000001",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "dev",
+                    "invoices",
+                    "0090000001"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"trackingId\": \"e9895805-4b54-4ec6-8b6a-8311b66fbe08\",\n  \"environment\": \"dev\",\n  \"erpInvoiceNo\": \"0090000001\",\n  \"sellerNtn\": \"0786909\",\n  \"callbackRef\": \"1000/2025\",\n  \"status\": \"SUBMITTED\",\n  \"replayed\": false,\n  \"fbrInvoiceNo\": \"0786909DI1791922500470\",\n  \"dated\": \"2026-10-14 01:15:00\",\n  \"pralHttpStatus\": 200,\n  \"pralResponse\": {\n    \"invoiceNumber\": \"0786909DI1791922500470\",\n    \"dated\": \"2026-10-14 01:15:00\",\n    \"validationResponse\": {\n      \"statusCode\": \"00\",\n      \"status\": \"Valid\",\n      \"error\": \"\",\n      \"invoiceStatuses\": [\n        {\n          \"itemSNo\": \"1\",\n          \"statusCode\": \"00\",\n          \"status\": \"Valid\",\n          \"errorCode\": \"\",\n          \"error\": \"\",\n          \"invoiceNo\": \"0786909DI1791922500470-1\"\n        }\n      ]\n    }\n  },\n  \"localErrors\": [],\n  \"errorDescriptions\": [],\n  \"attempts\": 2,\n  \"receivedAt\": \"2026-10-13T20:15:00.016823Z\",\n  \"completedAt\": \"2026-10-13T20:15:00.062818Z\",\n  \"elapsedMs\": 45\n}"
+            }
+          ]
+        },
+        {
+          "name": "4. Submit debit note",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "Middleware API key (MIDDLEWARE_API_KEYS)"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{devToken}}",
+                "description": "PRAL Bearer token for this environment, from ZFBR_TOKEN"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/dev/invoices",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "dev",
+                "invoices"
+              ]
+            },
+            "description": "Debit Note: invoiceRefNo must carry the original FBR invoice number (22 chars for NTN sellers, 28 for CNIC). Replace the sample invoiceRefNo with a real number from a previous SUBMITTED response ({{lastFbrInvoiceNo}}).",
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"erpInvoiceNo\": \"0090000002\",\n  \"sellerNtn\": \"0786909\",\n  \"callbackRef\": \"1000/2025\",\n  \"invoice\": {\n    \"invoiceType\": \"Debit Note\",\n    \"invoiceDate\": \"2025-05-20\",\n    \"sellerNTNCNIC\": \"0786909\",\n    \"sellerBusinessName\": \"Company 8\",\n    \"sellerProvince\": \"Sindh\",\n    \"sellerAddress\": \"Karachi\",\n    \"buyerNTNCNIC\": \"1000000000000\",\n    \"buyerBusinessName\": \"FERTILIZER MANUFAC IRS NEW\",\n    \"buyerProvince\": \"Sindh\",\n    \"buyerAddress\": \"Karachi\",\n    \"buyerRegistrationType\": \"Registered\",\n    \"invoiceRefNo\": \"7000007DI1747119701593\",\n    \"scenarioId\": \"SN001\",\n    \"items\": [\n      {\n        \"hsCode\": \"0101.2100\",\n        \"productDescription\": \"price adjustment on original invoice\",\n        \"rate\": \"18%\",\n        \"uoM\": \"Numbers, pieces, units\",\n        \"quantity\": 1.0,\n        \"totalValues\": 236.0,\n        \"valueSalesExcludingST\": 200.0,\n        \"fixedNotifiedValueOrRetailPrice\": 0.0,\n        \"salesTaxApplicable\": 36.0,\n        \"salesTaxWithheldAtSource\": 0.0,\n        \"extraTax\": 0.0,\n        \"furtherTax\": 0.0,\n        \"sroScheduleNo\": \"\",\n        \"fedPayable\": 0.0,\n        \"discount\": 0.0,\n        \"saleType\": \"Goods at standard rate (default)\",\n        \"sroItemSerialNo\": \"\"\n      }\n    ]\n  }\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201/200 or 422 REJECTED_FBR (reference unknown to PRAL)', () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 422]));",
+                  "const b = pm.response.json();",
+                  "pm.test('X-Tracking-Id header equals trackingId', () => pm.expect(pm.response.headers.get('X-Tracking-Id')).to.eql(b.trackingId));",
+                  "pm.test('envelope has every documented field', () => {",
+                  "  ['trackingId','environment','erpInvoiceNo','sellerNtn','callbackRef','status','replayed','fbrInvoiceNo','dated',",
+                  "   'pralHttpStatus','pralResponse','localErrors','errorDescriptions','attempts','receivedAt','completedAt','elapsedMs']",
+                  "   .forEach(k => pm.expect(b, k).to.have.property(k));",
+                  "});",
+                  "pm.collectionVariables.set('lastTrackingId', b.trackingId);",
+                  "if (b.fbrInvoiceNo) pm.collectionVariables.set('lastFbrInvoiceNo', b.fbrInvoiceNo);"
+                ]
+              }
+            }
+          ],
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "prd (PRAL production)",
+      "description": "Routes to validateinvoicedata / postinvoicedata. scenarioId is stripped. Uses {{prdToken}}. The same erpInvoiceNo is independent from dev.",
+      "item": [
+        {
+          "name": "1. Submit sale invoice",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "Middleware API key (MIDDLEWARE_API_KEYS)"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{prdToken}}",
+                "description": "PRAL Bearer token for this environment, from ZFBR_TOKEN"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/prd/invoices",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "prd",
+                "invoices"
+              ]
+            },
+            "description": "Spec production sample (Unregistered buyer, no scenarioId).",
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"erpInvoiceNo\": \"{{erpInvoiceNo}}\",\n  \"sellerNtn\": \"0786909\",\n  \"callbackRef\": \"1000/2025\",\n  \"invoice\": {\n    \"invoiceType\": \"Sale Invoice\",\n    \"invoiceDate\": \"2025-04-21\",\n    \"sellerNTNCNIC\": \"0786909\",\n    \"sellerBusinessName\": \"Company 8\",\n    \"sellerProvince\": \"Sindh\",\n    \"sellerAddress\": \"Karachi\",\n    \"buyerNTNCNIC\": \"1000000000000\",\n    \"buyerBusinessName\": \"FERTILIZER MANUFAC IRS NEW\",\n    \"buyerProvince\": \"Sindh\",\n    \"buyerAddress\": \"Karachi\",\n    \"buyerRegistrationType\": \"Unregistered\",\n    \"invoiceRefNo\": \"\",\n    \"items\": [\n      {\n        \"hsCode\": \"0101.2100\",\n        \"productDescription\": \"product Description\",\n        \"rate\": \"18%\",\n        \"uoM\": \"Numbers, pieces, units\",\n        \"quantity\": 1.0,\n        \"totalValues\": 0.0,\n        \"valueSalesExcludingST\": 1000.0,\n        \"fixedNotifiedValueOrRetailPrice\": 0.0,\n        \"salesTaxApplicable\": 180.0,\n        \"salesTaxWithheldAtSource\": 0.0,\n        \"extraTax\": 0.0,\n        \"furtherTax\": 120.0,\n        \"sroScheduleNo\": \"SRO123\",\n        \"fedPayable\": 0.0,\n        \"discount\": 0.0,\n        \"saleType\": \"Goods at standard rate (default)\",\n        \"sroItemSerialNo\": \"\"\n      }\n    ]\n  }\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201 (fresh) or 200 (replayed)', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "pm.test('status SUBMITTED', () => pm.expect(pm.response.json().status).to.eql('SUBMITTED'));",
+                  "pm.test('environment prd', () => pm.expect(pm.response.json().environment).to.eql('prd'));",
+                  "const b = pm.response.json();",
+                  "pm.test('X-Tracking-Id header equals trackingId', () => pm.expect(pm.response.headers.get('X-Tracking-Id')).to.eql(b.trackingId));",
+                  "pm.test('envelope has every documented field', () => {",
+                  "  ['trackingId','environment','erpInvoiceNo','sellerNtn','callbackRef','status','replayed','fbrInvoiceNo','dated',",
+                  "   'pralHttpStatus','pralResponse','localErrors','errorDescriptions','attempts','receivedAt','completedAt','elapsedMs']",
+                  "   .forEach(k => pm.expect(b, k).to.have.property(k));",
+                  "});",
+                  "pm.collectionVariables.set('lastTrackingId', b.trackingId);",
+                  "if (b.fbrInvoiceNo) pm.collectionVariables.set('lastFbrInvoiceNo', b.fbrInvoiceNo);"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "2. Lookup by erpInvoiceNo",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "Middleware API key (MIDDLEWARE_API_KEYS)"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/prd/invoices/{{erpInvoiceNo}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "prd",
+                "invoices",
+                "{{erpInvoiceNo}}"
+              ]
+            },
+            "description": "Stored production result. API key only."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('environment prd', () => pm.expect(pm.response.json().environment).to.eql('prd'));"
+                ]
+              }
+            }
+          ],
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Error cases",
+      "description": "Each middleware outcome. The REJECT / bad-token cases rely on tools/mock_pral.py triggers; against the real sandbox they produce whatever PRAL answers.",
+      "item": [
+        {
+          "name": "401 missing X-API-Key",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{devToken}}",
+                "description": "PRAL Bearer token for this environment, from ZFBR_TOKEN"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/dev/invoices",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "dev",
+                "invoices"
+              ]
+            },
+            "description": "Nothing is stored.",
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"erpInvoiceNo\": \"ERR-401-KEY\",\n  \"sellerNtn\": \"0786909\",\n  \"callbackRef\": \"1000/2025\",\n  \"invoice\": {\n    \"invoiceType\": \"Sale Invoice\",\n    \"invoiceDate\": \"2025-04-21\",\n    \"sellerNTNCNIC\": \"0786909\",\n    \"sellerBusinessName\": \"Company 8\",\n    \"sellerProvince\": \"Sindh\",\n    \"sellerAddress\": \"Karachi\",\n    \"buyerNTNCNIC\": \"1000000000000\",\n    \"buyerBusinessName\": \"FERTILIZER MANUFAC IRS NEW\",\n    \"buyerProvince\": \"Sindh\",\n    \"buyerAddress\": \"Karachi\",\n    \"buyerRegistrationType\": \"Registered\",\n    \"invoiceRefNo\": \"\",\n    \"scenarioId\": \"SN001\",\n    \"items\": [\n      {\n        \"hsCode\": \"0101.2100\",\n        \"productDescription\": \"product Description\",\n        \"rate\": \"18%\",\n        \"uoM\": \"Numbers, pieces, units\",\n        \"quantity\": 1.0,\n        \"totalValues\": 0.0,\n        \"valueSalesExcludingST\": 1000.0,\n        \"fixedNotifiedValueOrRetailPrice\": 0.0,\n        \"salesTaxApplicable\": 180.0,\n        \"salesTaxWithheldAtSource\": 0.0,\n        \"extraTax\": 0.0,\n        \"furtherTax\": 120.0,\n        \"sroScheduleNo\": \"\",\n        \"fedPayable\": 0.0,\n        \"discount\": 0.0,\n        \"saleType\": \"Goods at standard rate (default)\",\n        \"sroItemSerialNo\": \"\"\n      }\n    ]\n  }\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 401', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "401 missing Bearer",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "Middleware API key (MIDDLEWARE_API_KEYS)"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/dev/invoices",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "dev",
+                "invoices"
+              ]
+            },
+            "description": "Nothing is stored.",
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"erpInvoiceNo\": \"ERR-401-TOKEN\",\n  \"sellerNtn\": \"0786909\",\n  \"callbackRef\": \"1000/2025\",\n  \"invoice\": {\n    \"invoiceType\": \"Sale Invoice\",\n    \"invoiceDate\": \"2025-04-21\",\n    \"sellerNTNCNIC\": \"0786909\",\n    \"sellerBusinessName\": \"Company 8\",\n    \"sellerProvince\": \"Sindh\",\n    \"sellerAddress\": \"Karachi\",\n    \"buyerNTNCNIC\": \"1000000000000\",\n    \"buyerBusinessName\": \"FERTILIZER MANUFAC IRS NEW\",\n    \"buyerProvince\": \"Sindh\",\n    \"buyerAddress\": \"Karachi\",\n    \"buyerRegistrationType\": \"Registered\",\n    \"invoiceRefNo\": \"\",\n    \"scenarioId\": \"SN001\",\n    \"items\": [\n      {\n        \"hsCode\": \"0101.2100\",\n        \"productDescription\": \"product Description\",\n        \"rate\": \"18%\",\n        \"uoM\": \"Numbers, pieces, units\",\n        \"quantity\": 1.0,\n        \"totalValues\": 0.0,\n        \"valueSalesExcludingST\": 1000.0,\n        \"fixedNotifiedValueOrRetailPrice\": 0.0,\n        \"salesTaxApplicable\": 180.0,\n        \"salesTaxWithheldAtSource\": 0.0,\n        \"extraTax\": 0.0,\n        \"furtherTax\": 120.0,\n        \"sroScheduleNo\": \"\",\n        \"fedPayable\": 0.0,\n        \"discount\": 0.0,\n        \"saleType\": \"Goods at standard rate (default)\",\n        \"sroItemSerialNo\": \"\"\n      }\n    ]\n  }\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 401', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "404 unknown environment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "Middleware API key (MIDDLEWARE_API_KEYS)"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{devToken}}",
+                "description": "PRAL Bearer token for this environment, from ZFBR_TOKEN"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/qa/invoices",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "qa",
+                "invoices"
+              ]
+            },
+            "description": "Only dev and prd exist.",
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"erpInvoiceNo\": \"ERR-404\",\n  \"sellerNtn\": \"0786909\",\n  \"callbackRef\": \"1000/2025\",\n  \"invoice\": {\n    \"invoiceType\": \"Sale Invoice\",\n    \"invoiceDate\": \"2025-04-21\",\n    \"sellerNTNCNIC\": \"0786909\",\n    \"sellerBusinessName\": \"Company 8\",\n    \"sellerProvince\": \"Sindh\",\n    \"sellerAddress\": \"Karachi\",\n    \"buyerNTNCNIC\": \"1000000000000\",\n    \"buyerBusinessName\": \"FERTILIZER MANUFAC IRS NEW\",\n    \"buyerProvince\": \"Sindh\",\n    \"buyerAddress\": \"Karachi\",\n    \"buyerRegistrationType\": \"Registered\",\n    \"invoiceRefNo\": \"\",\n    \"scenarioId\": \"SN001\",\n    \"items\": [\n      {\n        \"hsCode\": \"0101.2100\",\n        \"productDescription\": \"product Description\",\n        \"rate\": \"18%\",\n        \"uoM\": \"Numbers, pieces, units\",\n        \"quantity\": 1.0,\n        \"totalValues\": 0.0,\n        \"valueSalesExcludingST\": 1000.0,\n        \"fixedNotifiedValueOrRetailPrice\": 0.0,\n        \"salesTaxApplicable\": 180.0,\n        \"salesTaxWithheldAtSource\": 0.0,\n        \"extraTax\": 0.0,\n        \"furtherTax\": 120.0,\n        \"sroScheduleNo\": \"\",\n        \"fedPayable\": 0.0,\n        \"discount\": 0.0,\n        \"saleType\": \"Goods at standard rate (default)\",\n        \"sroItemSerialNo\": \"\"\n      }\n    ]\n  }\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 404', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "422 shape: missing scenarioId on dev",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "Middleware API key (MIDDLEWARE_API_KEYS)"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{devToken}}",
+                "description": "PRAL Bearer token for this environment, from ZFBR_TOKEN"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/dev/invoices",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "dev",
+                "invoices"
+              ]
+            },
+            "description": "Field-level error, nothing stored. (On prd the same body is accepted.)",
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"erpInvoiceNo\": \"ERR-422-SCN\",\n  \"sellerNtn\": \"0786909\",\n  \"callbackRef\": \"1000/2025\",\n  \"invoice\": {\n    \"invoiceType\": \"Sale Invoice\",\n    \"invoiceDate\": \"2025-04-21\",\n    \"sellerNTNCNIC\": \"0786909\",\n    \"sellerBusinessName\": \"Company 8\",\n    \"sellerProvince\": \"Sindh\",\n    \"sellerAddress\": \"Karachi\",\n    \"buyerNTNCNIC\": \"1000000000000\",\n    \"buyerBusinessName\": \"FERTILIZER MANUFAC IRS NEW\",\n    \"buyerProvince\": \"Sindh\",\n    \"buyerAddress\": \"Karachi\",\n    \"buyerRegistrationType\": \"Registered\",\n    \"invoiceRefNo\": \"\",\n    \"items\": [\n      {\n        \"hsCode\": \"0101.2100\",\n        \"productDescription\": \"product Description\",\n        \"rate\": \"18%\",\n        \"uoM\": \"Numbers, pieces, units\",\n        \"quantity\": 1.0,\n        \"totalValues\": 0.0,\n        \"valueSalesExcludingST\": 1000.0,\n        \"fixedNotifiedValueOrRetailPrice\": 0.0,\n        \"salesTaxApplicable\": 180.0,\n        \"salesTaxWithheldAtSource\": 0.0,\n        \"extraTax\": 0.0,\n        \"furtherTax\": 120.0,\n        \"sroScheduleNo\": \"\",\n        \"fedPayable\": 0.0,\n        \"discount\": 0.0,\n        \"saleType\": \"Goods at standard rate (default)\",\n        \"sroItemSerialNo\": \"\"\n      }\n    ]\n  }\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 422', () => pm.response.to.have.status(422));",
+                  "pm.test('names invoice.scenarioId', () => pm.expect(pm.response.json().detail[0].field).to.eql('invoice.scenarioId'));"
+                ]
+              }
+            }
+          ],
+          "response": [
+            {
+              "name": "422 field error",
+              "originalRequest": {
+                "method": "POST",
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/dev/invoices",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "dev",
+                    "invoices"
+                  ]
+                }
+              },
+              "status": "Unprocessable Entity",
+              "code": 422,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"detail\": [\n    {\n      \"field\": \"invoice.scenarioId\",\n      \"message\": \"scenarioId (SN001..SN028) is required for the dev (sandbox) environment\",\n      \"type\": \"L008\"\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "422 shape: withheld tax mismatch",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "Middleware API key (MIDDLEWARE_API_KEYS)"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{devToken}}",
+                "description": "PRAL Bearer token for this environment, from ZFBR_TOKEN"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/dev/invoices",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "dev",
+                "invoices"
+              ]
+            },
+            "description": "salesTaxWithheldAtSource must be 0 or equal to salesTaxApplicable.",
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"erpInvoiceNo\": \"ERR-422-WH\",\n  \"sellerNtn\": \"0786909\",\n  \"callbackRef\": \"1000/2025\",\n  \"invoice\": {\n    \"invoiceType\": \"Sale Invoice\",\n    \"invoiceDate\": \"2025-04-21\",\n    \"sellerNTNCNIC\": \"0786909\",\n    \"sellerBusinessName\": \"Company 8\",\n    \"sellerProvince\": \"Sindh\",\n    \"sellerAddress\": \"Karachi\",\n    \"buyerNTNCNIC\": \"1000000000000\",\n    \"buyerBusinessName\": \"FERTILIZER MANUFAC IRS NEW\",\n    \"buyerProvince\": \"Sindh\",\n    \"buyerAddress\": \"Karachi\",\n    \"buyerRegistrationType\": \"Registered\",\n    \"invoiceRefNo\": \"\",\n    \"scenarioId\": \"SN001\",\n    \"items\": [\n      {\n        \"hsCode\": \"0101.2100\",\n        \"productDescription\": \"product Description\",\n        \"rate\": \"18%\",\n        \"uoM\": \"Numbers, pieces, units\",\n        \"quantity\": 1.0,\n        \"totalValues\": 0.0,\n        \"valueSalesExcludingST\": 1000.0,\n        \"fixedNotifiedValueOrRetailPrice\": 0.0,\n        \"salesTaxApplicable\": 180.0,\n        \"salesTaxWithheldAtSource\": 50.0,\n        \"extraTax\": 0.0,\n        \"furtherTax\": 120.0,\n        \"sroScheduleNo\": \"\",\n        \"fedPayable\": 0.0,\n        \"discount\": 0.0,\n        \"saleType\": \"Goods at standard rate (default)\",\n        \"sroItemSerialNo\": \"\"\n      }\n    ]\n  }\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 422', () => pm.response.to.have.status(422));",
+                  "pm.test('names salesTaxWithheldAtSource', () => pm.expect(pm.response.json().detail[0].field).to.contain('salesTaxWithheldAtSource'));"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "422 REJECTED_FBR (mock trigger: REJECT)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "Middleware API key (MIDDLEWARE_API_KEYS)"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{devToken}}",
+                "description": "PRAL Bearer token for this environment, from ZFBR_TOKEN"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/dev/invoices",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "dev",
+                "invoices"
+              ]
+            },
+            "description": "Passes local validation, PRAL (mock) answers item-level error 0046. errorDescriptions carries the explanation.",
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"erpInvoiceNo\": \"ERR-FBR\",\n  \"sellerNtn\": \"0786909\",\n  \"callbackRef\": \"1000/2025\",\n  \"invoice\": {\n    \"invoiceType\": \"Sale Invoice\",\n    \"invoiceDate\": \"2025-04-21\",\n    \"sellerNTNCNIC\": \"0786909\",\n    \"sellerBusinessName\": \"Company 8\",\n    \"sellerProvince\": \"Sindh\",\n    \"sellerAddress\": \"Karachi\",\n    \"buyerNTNCNIC\": \"1000000000000\",\n    \"buyerBusinessName\": \"FERTILIZER MANUFAC IRS NEW\",\n    \"buyerProvince\": \"Sindh\",\n    \"buyerAddress\": \"Karachi\",\n    \"buyerRegistrationType\": \"Registered\",\n    \"invoiceRefNo\": \"\",\n    \"scenarioId\": \"SN001\",\n    \"items\": [\n      {\n        \"hsCode\": \"0101.2100\",\n        \"productDescription\": \"REJECT this item\",\n        \"rate\": \"18%\",\n        \"uoM\": \"Numbers, pieces, units\",\n        \"quantity\": 1.0,\n        \"totalValues\": 0.0,\n        \"valueSalesExcludingST\": 1000.0,\n        \"fixedNotifiedValueOrRetailPrice\": 0.0,\n        \"salesTaxApplicable\": 180.0,\n        \"salesTaxWithheldAtSource\": 0.0,\n        \"extraTax\": 0.0,\n        \"furtherTax\": 120.0,\n        \"sroScheduleNo\": \"\",\n        \"fedPayable\": 0.0,\n        \"discount\": 0.0,\n        \"saleType\": \"Goods at standard rate (default)\",\n        \"sroItemSerialNo\": \"\"\n      }\n    ]\n  }\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 422', () => pm.response.to.have.status(422));",
+                  "pm.test('status REJECTED_FBR', () => pm.expect(pm.response.json().status).to.eql('REJECTED_FBR'));",
+                  "pm.test('errorDescriptions filled', () => pm.expect(pm.response.json().errorDescriptions).to.not.be.empty);",
+                  "const b = pm.response.json();",
+                  "pm.test('X-Tracking-Id header equals trackingId', () => pm.expect(pm.response.headers.get('X-Tracking-Id')).to.eql(b.trackingId));",
+                  "pm.test('envelope has every documented field', () => {",
+                  "  ['trackingId','environment','erpInvoiceNo','sellerNtn','callbackRef','status','replayed','fbrInvoiceNo','dated',",
+                  "   'pralHttpStatus','pralResponse','localErrors','errorDescriptions','attempts','receivedAt','completedAt','elapsedMs']",
+                  "   .forEach(k => pm.expect(b, k).to.have.property(k));",
+                  "});",
+                  "pm.collectionVariables.set('lastTrackingId', b.trackingId);",
+                  "if (b.fbrInvoiceNo) pm.collectionVariables.set('lastFbrInvoiceNo', b.fbrInvoiceNo);"
+                ]
+              }
+            }
+          ],
+          "response": [
+            {
+              "name": "422 REJECTED_FBR",
+              "originalRequest": {
+                "method": "POST",
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/dev/invoices",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "dev",
+                    "invoices"
+                  ]
+                }
+              },
+              "status": "Unprocessable Entity",
+              "code": 422,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"trackingId\": \"38b7c683-0d27-4729-8178-1629d12d7824\",\n  \"environment\": \"dev\",\n  \"erpInvoiceNo\": \"0090000005\",\n  \"sellerNtn\": \"0786909\",\n  \"callbackRef\": null,\n  \"status\": \"REJECTED_FBR\",\n  \"replayed\": false,\n  \"fbrInvoiceNo\": null,\n  \"dated\": \"2026-10-14 01:16:10\",\n  \"pralHttpStatus\": 200,\n  \"pralResponse\": {\n    \"dated\": \"2026-10-14 01:16:10\",\n    \"validationResponse\": {\n      \"statusCode\": \"00\",\n      \"status\": \"invalid\",\n      \"errorCode\": null,\n      \"error\": \"\",\n      \"invoiceStatuses\": [\n        {\n          \"itemSNo\": \"1\",\n          \"statusCode\": \"01\",\n          \"status\": \"Invalid\",\n          \"invoiceNo\": null,\n          \"errorCode\": \"0046\",\n          \"error\": \"Provide rate.\"\n        }\n      ]\n    }\n  },\n  \"localErrors\": [],\n  \"errorDescriptions\": [\n    {\n      \"code\": \"0046\",\n      \"description\": \"Rate cannot be empty, please provide valid rate as per selected Sales Type.\"\n    }\n  ],\n  \"attempts\": 1,\n  \"receivedAt\": \"2026-10-13T20:16:10.100000Z\",\n  \"completedAt\": \"2026-10-13T20:16:10.140000Z\",\n  \"elapsedMs\": 40\n}"
+            }
+          ]
+        },
+        {
+          "name": "502 AUTH_ERROR (mock trigger: token 'bad')",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "Middleware API key (MIDDLEWARE_API_KEYS)"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer bad",
+                "description": "PRAL Bearer token for this environment, from ZFBR_TOKEN"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/dev/invoices",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "dev",
+                "invoices"
+              ]
+            },
+            "description": "PRAL answers 401: the token is invalid or not bound to this NTN. Fix ZFBR_TOKEN and resubmit.",
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"erpInvoiceNo\": \"ERR-AUTH\",\n  \"sellerNtn\": \"0786909\",\n  \"callbackRef\": \"1000/2025\",\n  \"invoice\": {\n    \"invoiceType\": \"Sale Invoice\",\n    \"invoiceDate\": \"2025-04-21\",\n    \"sellerNTNCNIC\": \"0786909\",\n    \"sellerBusinessName\": \"Company 8\",\n    \"sellerProvince\": \"Sindh\",\n    \"sellerAddress\": \"Karachi\",\n    \"buyerNTNCNIC\": \"1000000000000\",\n    \"buyerBusinessName\": \"FERTILIZER MANUFAC IRS NEW\",\n    \"buyerProvince\": \"Sindh\",\n    \"buyerAddress\": \"Karachi\",\n    \"buyerRegistrationType\": \"Registered\",\n    \"invoiceRefNo\": \"\",\n    \"scenarioId\": \"SN001\",\n    \"items\": [\n      {\n        \"hsCode\": \"0101.2100\",\n        \"productDescription\": \"product Description\",\n        \"rate\": \"18%\",\n        \"uoM\": \"Numbers, pieces, units\",\n        \"quantity\": 1.0,\n        \"totalValues\": 0.0,\n        \"valueSalesExcludingST\": 1000.0,\n        \"fixedNotifiedValueOrRetailPrice\": 0.0,\n        \"salesTaxApplicable\": 180.0,\n        \"salesTaxWithheldAtSource\": 0.0,\n        \"extraTax\": 0.0,\n        \"furtherTax\": 120.0,\n        \"sroScheduleNo\": \"\",\n        \"fedPayable\": 0.0,\n        \"discount\": 0.0,\n        \"saleType\": \"Goods at standard rate (default)\",\n        \"sroItemSerialNo\": \"\"\n      }\n    ]\n  }\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 502', () => pm.response.to.have.status(502));",
+                  "pm.test('status AUTH_ERROR', () => pm.expect(pm.response.json().status).to.eql('AUTH_ERROR'));"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "502 FAILED_UPSTREAM (mock trigger: FAIL500)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "Middleware API key (MIDDLEWARE_API_KEYS)"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{devToken}}",
+                "description": "PRAL Bearer token for this environment, from ZFBR_TOKEN"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/dev/invoices",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "dev",
+                "invoices"
+              ]
+            },
+            "description": "PRAL 5xx three times with 2 s + 4 s backoff (about 6 s). Safe to resubmit later.",
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"erpInvoiceNo\": \"ERR-5XX\",\n  \"sellerNtn\": \"0786909\",\n  \"callbackRef\": \"1000/2025\",\n  \"invoice\": {\n    \"invoiceType\": \"Sale Invoice\",\n    \"invoiceDate\": \"2025-04-21\",\n    \"sellerNTNCNIC\": \"0786909\",\n    \"sellerBusinessName\": \"Company 8\",\n    \"sellerProvince\": \"Sindh\",\n    \"sellerAddress\": \"Karachi\",\n    \"buyerNTNCNIC\": \"1000000000000\",\n    \"buyerBusinessName\": \"FERTILIZER MANUFAC IRS NEW\",\n    \"buyerProvince\": \"Sindh\",\n    \"buyerAddress\": \"Karachi\",\n    \"buyerRegistrationType\": \"Registered\",\n    \"invoiceRefNo\": \"\",\n    \"scenarioId\": \"SN001\",\n    \"items\": [\n      {\n        \"hsCode\": \"0101.2100\",\n        \"productDescription\": \"FAIL500\",\n        \"rate\": \"18%\",\n        \"uoM\": \"Numbers, pieces, units\",\n        \"quantity\": 1.0,\n        \"totalValues\": 0.0,\n        \"valueSalesExcludingST\": 1000.0,\n        \"fixedNotifiedValueOrRetailPrice\": 0.0,\n        \"salesTaxApplicable\": 180.0,\n        \"salesTaxWithheldAtSource\": 0.0,\n        \"extraTax\": 0.0,\n        \"furtherTax\": 120.0,\n        \"sroScheduleNo\": \"\",\n        \"fedPayable\": 0.0,\n        \"discount\": 0.0,\n        \"saleType\": \"Goods at standard rate (default)\",\n        \"sroItemSerialNo\": \"\"\n      }\n    ]\n  }\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 502', () => pm.response.to.have.status(502));",
+                  "pm.test('status FAILED_UPSTREAM after 3 attempts', () => { const b = pm.response.json(); pm.expect(b.status).to.eql('FAILED_UPSTREAM'); pm.expect(b.attempts).to.eql(3); });"
+                ]
+              }
+            }
+          ],
+          "response": []
+        }
+      ]
+    }
+  ]
+}

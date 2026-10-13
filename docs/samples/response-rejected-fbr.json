@@ -1,0 +1,42 @@
+{
+  "trackingId": "38b7c683-0d27-4729-8178-1629d12d7824",
+  "environment": "dev",
+  "erpInvoiceNo": "0090000005",
+  "sellerNtn": "0786909",
+  "callbackRef": null,
+  "status": "REJECTED_FBR",
+  "replayed": false,
+  "fbrInvoiceNo": null,
+  "dated": "2026-10-14 01:16:10",
+  "pralHttpStatus": 200,
+  "pralResponse": {
+    "dated": "2026-10-14 01:16:10",
+    "validationResponse": {
+      "statusCode": "00",
+      "status": "invalid",
+      "errorCode": null,
+      "error": "",
+      "invoiceStatuses": [
+        {
+          "itemSNo": "1",
+          "statusCode": "01",
+          "status": "Invalid",
+          "invoiceNo": null,
+          "errorCode": "0046",
+          "error": "Provide rate."
+        }
+      ]
+    }
+  },
+  "localErrors": [],
+  "errorDescriptions": [
+    {
+      "code": "0046",
+      "description": "Rate cannot be empty, please provide valid rate as per selected Sales Type."
+    }
+  ],
+  "attempts": 1,
+  "receivedAt": "2026-10-13T20:16:10.100000Z",
+  "completedAt": "2026-10-13T20:16:10.140000Z",
+  "elapsedMs": 40
+}

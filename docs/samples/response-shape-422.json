@@ -1,0 +1,9 @@
+{
+  "detail": [
+    {
+      "field": "invoice.scenarioId",
+      "message": "scenarioId (SN001..SN028) is required for the dev (sandbox) environment",
+      "type": "L008"
+    }
+  ]
+}
