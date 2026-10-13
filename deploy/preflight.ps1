@@ -119,7 +119,34 @@ try {
 $tz = (Get-TimeZone).Id
 Report "PASS" "Server time zone" "$tz (local now $(Get-Date -Format 'yyyy-MM-dd HH:mm'))"
 
-# 13. Long path / execution policy
+# 13. Coexistence: other Python installations that share PATH with this deployment
+$pyOnPath = @(& where.exe python 2>$null) | Where-Object { $_ -and $_ -notlike "*WindowsApps*" }
+$pyInstalls = @(Get-ChildItem "HKLM:\SOFTWARE\Python\PythonCore", "HKCU:\SOFTWARE\Python\PythonCore" -ErrorAction SilentlyContinue | ForEach-Object { $_.PSChildName })
+if ($pyOnPath.Count -gt 1 -or ($pyInstalls | Where-Object { $_ -notlike "3.12*" })) {
+    Report "WARN" "Other Python installs on this server" ("registry: " + ($pyInstalls -join ", ") + "; on PATH: " + ($pyOnPath -join ", ") + " -> install 3.12 WITHOUT 'Add to PATH' and build the venv from its absolute path so other apps keep their python")
+} else {
+    Report "PASS" "Other Python installs on this server" $(if ($pyInstalls) { "only " + ($pyInstalls -join ", ") } else { "none registered" })
+}
+
+# 14. Coexistence: IIS present and anything already bound to 443 (matters only for the IIS reverse-proxy option)
+$iis = Get-Service -Name W3SVC -ErrorAction SilentlyContinue
+if ($iis) {
+    try {
+        Import-Module WebAdministration -ErrorAction Stop
+        $b443 = @(Get-WebBinding -Port 443 -ErrorAction SilentlyContinue | ForEach-Object { "$($_.ItemXPath -replace ".*name='([^']+)'.*", '$1') [$($_.bindingInformation)]" })
+        if ($b443) {
+            Report "WARN" "IIS bindings on 443" (($b443 -join "; ") + " -> use a distinct host name (SNI) for the middleware site or another port")
+        } else { Report "PASS" "IIS bindings on 443" "IIS running ($($iis.Status)), nothing bound to 443 yet" }
+    } catch { Report "WARN" "IIS bindings on 443" "IIS running but WebAdministration module unavailable; check bindings in IIS Manager" }
+} else { Report "PASS" "IIS" "not installed (direct uvicorn TLS or install IIS later)" }
+
+# 15. Coexistence: firewall rule name and other services using the same port range
+$fw = Get-NetFirewallRule -DisplayName "FBR Middleware" -ErrorAction SilentlyContinue
+Report "PASS" "Firewall rule 'FBR Middleware'" $(if ($fw) { "exists already; New-NetFirewallRule would add a duplicate, edit the existing one" } else { "none yet" })
+$otherSvcs = @(Get-CimInstance Win32_Service | Where-Object { $_.PathName -match "nssm|python|uvicorn" -and $_.Name -ne "FbrMiddleware" } | ForEach-Object { "$($_.Name) ($($_.State))" })
+Report "PASS" "Other Python/NSSM services present" $(if ($otherSvcs) { ($otherSvcs -join "; ") + " -> keep ports and folders separate" } else { "none" })
+
+# 16. Long path / execution policy
 $policy = Get-ExecutionPolicy -Scope CurrentUser
 Report ($(if ($policy -in @("RemoteSigned", "Unrestricted", "Bypass")) { "PASS" } else { "WARN" })) "Execution policy (CurrentUser)" "$policy (RemoteSigned needed to dot-source Activate.ps1; python.exe calls work regardless)"
 

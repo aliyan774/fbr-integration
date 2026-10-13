@@ -14,14 +14,14 @@ All commands are PowerShell, run as Administrator unless noted.
 
 | Item | Detail |
 |---|---|
-| Python | 3.12 64-bit from python.org, installed for all users, "Add to PATH" ticked. Not the Microsoft Store build. 3.14 is not supported yet by the pydantic wheels. |
+| Python | 3.12 64-bit from python.org, installed for all users. Not the Microsoft Store build. 3.14 is not supported yet by the pydantic wheels. **If any other Python already exists on the server, install without "Add to PATH"** and use the absolute interpreter path in step 3; the middleware never needs `python` on PATH. |
 | NSSM | `nssm.exe` 2.24 or later (https://nssm.cc), copied to `C:\fbr-middleware\nssm.exe` |
 | Network | Outbound HTTPS from the server to `gw.fbr.gov.pk` (through the corporate proxy if any). Inbound TCP from the SAP application servers to the middleware port. |
 | Service account | A local or domain account with "Log on as a service". Below: `NT SERVICE\FbrMiddleware` (virtual account, created by the service) |
 | Secrets | Middleware API key(s) for SAP. The PRAL tokens are **not** needed on this server; SAP sends them per request. |
 | Certificate | Only if TLS terminates on the middleware (see section 8). |
 
-## 1a. Pre-flight checks (run before anything is installed)
+## 1b. Pre-flight checks (run before anything is installed)
 
 Run `app\deploy\preflight.ps1` (read-only, prints PASS / WARN / FAIL per check), or the
 individual commands below. Every FAIL blocks the install.
@@ -73,6 +73,31 @@ python -m pip download -d .\wheelhouse -e .\app
 .\.venv\Scripts\python.exe -m pip install --no-index --find-links .\wheelhouse -e .\app
 ```
 
+## 1c. Coexistence with other software on the server
+
+The deployment is self-contained. What it adds and what it never touches:
+
+| Adds | Never touches |
+|---|---|
+| folder `C:\fbr-middleware` with its own venv | the system Python packages of any other application |
+| one service `FbrMiddleware` (one process, about 100-150 MB RAM) | other services, scheduled tasks, the registry |
+| one listening port (8080 behind IIS, or 8443) | ports of other applications |
+| one inbound firewall rule scoped to the SAP server IPs | existing rules |
+| optional IIS site for TLS | existing IIS sites, if the new site uses its own host name or port |
+| outbound HTTPS to `gw.fbr.gov.pk` only | other outbound traffic |
+
+The only system-wide change is the Python 3.12 installer. With "Add to PATH" ticked it becomes
+the `python` that other scripts and services on the box resolve to. On a shared server install it
+without that option and create the venv from the absolute path:
+
+```powershell
+& "C:\Program Files\Python312\python.exe" -m venv C:\fbr-middleware\.venv
+```
+
+Checks 13 to 15 of `preflight.ps1` (section 1b) list other Python installations, existing IIS bindings on 443,
+the firewall rule and other Python or NSSM services, so port and folder clashes are seen before
+anything is installed.
+
 ## 2. Layout
 
 ```
@@ -95,7 +120,7 @@ cd C:\fbr-middleware
 git clone <repo-url> app          # or copy the folder over AnyDesk / file share
 
 python --version                  # must print 3.12.x
-python -m venv .venv
+python -m venv .venv                       # or: & "C:\Program Files\Python312\python.exe" -m venv .venv (shared server, Python not on PATH)
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
 .\.venv\Scripts\python.exe -m pip install -e .\app          # add ".\app[postgres]" for PostgreSQL
 ```
