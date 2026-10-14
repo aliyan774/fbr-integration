@@ -58,9 +58,18 @@ if ($pyExe) {
     Report "FAIL" "Python 3.12 64-bit" "no 'py -3.12' and no python on PATH -> install 3.12 for all users WITHOUT 'Add to PATH': python-3.12.x-amd64.exe /quiet InstallAllUsers=1 PrependPath=0 Include_launcher=1 Include_test=0, then re-run with -Python 'C:\Program Files\Python312\python.exe'"
 }
 # Python used by other NSSM services (so we never touch it, and may reuse its base install)
-$otherPy = @(Get-CimInstance Win32_Service | Where-Object { $_.PathName -match "python" -and $_.Name -ne "FbrMiddleware" })
+$otherPy = @()
+foreach ($svc in Get-CimInstance Win32_Service | Where-Object { $_.Name -ne "FbrMiddleware" }) {
+    $exe = $null
+    if ($svc.PathName -match "python") { $exe = ($svc.PathName -replace '^"?([^"]*python[^"]*\.exe).*$', '$1') }
+    elseif ($svc.PathName -match "nssm") {
+        $app = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\$($svc.Name)\Parameters" -ErrorAction SilentlyContinue).Application
+        if ($app -and $app -match "python") { $exe = $app }
+    }
+    if ($exe) { $otherPy += [pscustomobject]@{ Name = $svc.Name; Exe = $exe } }
+}
 foreach ($svc in $otherPy) {
-    $exe = ($svc.PathName -replace '^"?([^"]*python[^"]*\.exe).*$', '$1')
+    $exe = $svc.Exe
     $cfg = Join-Path (Split-Path (Split-Path $exe -Parent) -Parent) "pyvenv.cfg"
     $base = if (Test-Path $cfg) { ((Get-Content $cfg | Where-Object { $_ -match '^(home|version)\s*=' }) -join "; ") } else { "not a venv" }
     Report "PASS" "Python of service $($svc.Name)" "$exe ($base) -> leave it alone; reuse its base only if it is 3.12 and machine-wide"
@@ -139,7 +148,27 @@ Report ($(if ($nssm) { "PASS" } else { "WARN" })) "NSSM present" $(if ($nssm) { 
 $appPresent = (Test-Path (Join-Path $Root "pyproject.toml")) -and (Test-Path (Join-Path $Root "src\fbr_middleware\main.py"))
 Report ($(if ($appPresent) { "PASS" } else { "WARN" })) "Repository at $Root" $(if ($appPresent) { "found" } else { "clone or copy the repository there before install" })
 $envPath = Join-Path $Root ".env"
-Report ($(if (Test-Path $envPath) { "PASS" } else { "WARN" })) ".env at $Root" $(if (Test-Path $envPath) { "present (install-service.ps1 reads LISTEN_PORT and MIDDLEWARE_API_KEYS from it)" } else { "copy .env.example to .env and set production values" })
+if (Test-Path $envPath) {
+    $envValues = @{}
+    foreach ($line in Get-Content $envPath) {
+        if ($line -match '^\s*#' -or $line -notmatch '=') { continue }
+        $k, $v = $line -split '=', 2
+        $envValues[$k.Trim()] = $v.Trim().Trim('"').Trim("'")
+    }
+    $envPort = if ($envValues.ContainsKey("LISTEN_PORT")) { [int]$envValues["LISTEN_PORT"] } else { 0 }
+    $portHolder = if ($envPort -gt 0) { $allListening | Where-Object { $_.LocalPort -eq $envPort } | Select-Object -First 1 } else { $null }
+    if ($envPort -le 0) { Report "FAIL" ".env LISTEN_PORT" "not set" }
+    elseif ($portHolder) { Report "FAIL" ".env LISTEN_PORT" "$envPort is in use by $((Get-Process -Id $portHolder.OwningProcess -ErrorAction SilentlyContinue).ProcessName); set LISTEN_PORT=$Port (the .env.example default 8000 is OgraApi's port)" }
+    elseif ($envPort -ne $Port) { Report "WARN" ".env LISTEN_PORT" "$envPort differs from -Port $Port; the install uses $envPort" }
+    else { Report "PASS" ".env LISTEN_PORT" "$envPort" }
+    $keys = if ($envValues.ContainsKey("MIDDLEWARE_API_KEYS")) { $envValues["MIDDLEWARE_API_KEYS"] } else { "" }
+    if (-not $keys -or $keys -like "*change-me*") { Report "FAIL" ".env MIDDLEWARE_API_KEYS" "empty or still the example value; set a real key per SAP system" }
+    else { Report "PASS" ".env MIDDLEWARE_API_KEYS" "$(($keys -split ',').Count) key(s) set" }
+    $lh = if ($envValues.ContainsKey("LISTEN_HOST")) { $envValues["LISTEN_HOST"] } else { "0.0.0.0" }
+    Report "PASS" ".env LISTEN_HOST" "$lh$(if ($lh -eq '127.0.0.1') { ' (only a reverse proxy on this box can reach it)' })"
+} else {
+    Report "WARN" ".env at $Root" "copy .env.example to .env and set MIDDLEWARE_API_KEYS, LISTEN_HOST=0.0.0.0, LISTEN_PORT=$Port"
+}
 
 # 11. Disk space on the root drive
 $drive = (Split-Path -Qualifier $Root)
