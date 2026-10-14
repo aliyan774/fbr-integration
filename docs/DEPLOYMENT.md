@@ -4,9 +4,14 @@ How we run the FBR middleware on the PRL machine, following the same pattern as 
 already runs there: plain Python, supervised by NSSM, configuration in a `.env` file, logs on disk.
 No Docker, no IIS dependency unless TLS is terminated there.
 
-Everything here assumes an **elevated PowerShell** on the target machine. The machine already
-hosts `OgraApi` on port 8000 with NSSM at `C:\nssm`, so this guide reuses that NSSM and never
-touches port 8000, the OGRA directory, or the Python the OGRA service uses.
+Everything here assumes an **elevated PowerShell** on the target machine: Start menu, type
+`PowerShell`, right-click, "Run as administrator". The prompt reads `PS C:\>`. If it reads `C:\>`
+you are in cmd.exe, where `;` is not a command separator and the commands below fail with "The
+filename, directory name, or volume label syntax is incorrect"; type `powershell` there first, or
+join commands with `&&` and use `cd /d`.
+
+The machine already hosts `OgraApi` on port 8000 with NSSM at `C:\nssm`, so this guide reuses
+that NSSM and never touches port 8000, the OGRA directory, or the Python the OGRA service uses.
 
 Scripts: `deploy\windows\preflight.ps1` (read-only checks), `deploy\windows\install-service.ps1`
 (does everything in sections 3 to 7), `deploy\windows\uninstall-service.ps1` (reverses it).
@@ -385,6 +390,11 @@ within seconds and `service.err.log` says `WinError 10048` / "address already in
 3.12 without that option, use `py -3.12` or the absolute path, and pass `-Python` to our install script.
 
 **Python 3.14 has no pydantic-core wheel.** `pip install` ends in `ResolutionImpossible`. Use 3.12.
+
+**cmd is not PowerShell.** A `C:\>` prompt is cmd.exe: `;` does not separate commands there, so
+`cd C:\fbr-middleware; powershell ...` fails with "The filename, directory name, or volume label
+syntax is incorrect". Type `powershell` first, or in cmd write
+`cd /d C:\fbr-middleware && powershell -ExecutionPolicy Bypass -File deploy\windows\preflight.ps1 -Root C:\fbr-middleware -Port 8080`.
 
 **PowerShell is not bash.** `&&` and `||` are parser errors in Windows PowerShell 5.1; use `;` or
 `if ($?) { ... }`. `curl` is an alias for `Invoke-WebRequest`; call `curl.exe` when you mean curl.
