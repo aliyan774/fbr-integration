@@ -16,6 +16,15 @@ that NSSM and never touches port 8000, the OGRA directory, or the Python the OGR
 Scripts: `deploy\windows\preflight.ps1` (read-only checks), `deploy\windows\install-service.ps1`
 (does everything in sections 3 to 7), `deploy\windows\uninstall-service.ps1` (reverses it).
 
+Addresses used throughout:
+
+| Machine | Address | Role |
+|---|---|---|
+| Middleware (this server) | `10.0.0.86`, port `8080` | runs `FbrMiddleware`; SAP calls `http://10.0.0.86:8080/api/v1/...` (HTTPS once section 8 is done) |
+| SAP DEV application server | `10.0.0.38` (SID `DEV`, instance `00`) | the only caller allowed through the firewall for now |
+| SAP QAS / PRD application servers | to be added | add to the firewall rule and the API key list before each system goes live |
+| OgraApi (same server) | `10.0.0.86`, port `8000` | existing service; untouched |
+
 ---
 
 ## 1. What runs the process
@@ -186,7 +195,7 @@ and the service cannot be reached directly even by accident.
 
 ```powershell
 New-NetFirewallRule -DisplayName "FBR Middleware" -Direction Inbound -Protocol TCP -LocalPort 8080 -Action Allow -Profile Domain,Private
-Set-NetFirewallRule -DisplayName "FBR Middleware" -RemoteAddress 10.0.0.11,10.0.0.12     # the SAP application servers
+Set-NetFirewallRule -DisplayName "FBR Middleware" -RemoteAddress 10.0.0.38              # SAP DEV app server; add QAS/PRD later
 Get-NetFirewallRule -DisplayName "FBR Middleware" | Get-NetFirewallPortFilter
 ```
 
@@ -309,8 +318,13 @@ Invoke-RestMethod -Method Post -Uri http://localhost:8080/api/v1/dev/invoices -H
 ```
 
 Expect `VALIDATED`, then `SUBMITTED` with an FBR number. The same POST again returns 200 with
-`replayed: true`. From an SAP application server, repeat the health call against the server's
-address to prove the firewall rule. Import `postman\FBR-Middleware.postman_collection.json` for the
+`replayed: true`. From the SAP DEV application server (10.0.0.38), prove the firewall rule:
+
+```powershell
+Invoke-RestMethod http://10.0.0.86:8080/health
+```
+
+If that times out while the local call works, the firewall rule or its `RemoteAddress` is wrong. Import `postman\FBR-Middleware.postman_collection.json` for the
 full set.
 
 **When the service will not start, read `service.err.log` first.** It holds the traceback, the
@@ -335,8 +349,9 @@ SAP's SM59 destination should use HTTPS. Two options:
 
 ## 9. SAP side
 
-Covered in `docs\SAP-ABAP-Interface-Spec.md` section 8: SM59 destination type G to this host and
-port, STRUST import of the certificate chain, `ZFBR_TOKEN` for the PRAL tokens, client timeout at
+Covered in `docs\SAP-ABAP-Interface-Spec.md` section 8: SM59 destination type G to
+`10.0.0.86` port `8080` (HTTP; switch to 443 / SSL active after section 8), STRUST import of the
+certificate chain, `ZFBR_TOKEN` for the PRAL tokens, client timeout at
 least 200 s, and GET before any resend after a 504 or a timeout.
 
 ---
@@ -457,7 +472,7 @@ environment variables and the `NETWORK SERVICE` account, ACLs, the firewall rule
 
 ```powershell
 cd C:\fbr-middleware
-powershell -ExecutionPolicy Bypass -File deploy\windows\install-service.ps1 -Python "C:\Program Files\Python312\python.exe" -SapServers 10.0.0.11,10.0.0.12
+powershell -ExecutionPolicy Bypass -File deploy\windows\install-service.ps1 -Python "C:\Program Files\Python312\python.exe" -SapServers 10.0.0.38
 ```
 
 It refuses to run without `C:\fbr-middleware\.env`, with an empty or default `MIDDLEWARE_API_KEYS`,

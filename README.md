@@ -177,6 +177,8 @@ $r = Invoke-RestMethod -Method Post -Uri http://localhost:8000/api/v1/dev/invoic
 $r | ConvertTo-Json -Depth 10
 ```
 
+Against the deployed server replace `localhost:8000` with `10.0.0.86:8080`.
+
 Look up a stored result later (only the API key is needed):
 
 ```powershell

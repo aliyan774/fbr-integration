@@ -7,8 +7,9 @@
   "variable": [
     {
       "key": "baseUrl",
-      "value": "http://localhost:8000",
-      "type": "string"
+      "value": "http://10.0.0.86:8080",
+      "type": "string",
+      "description": "middleware server; use http://localhost:8000 against a local dev instance"
     },
     {
       "key": "apiKey",
