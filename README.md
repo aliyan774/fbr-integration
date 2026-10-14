@@ -22,6 +22,7 @@ Documents:
 | Document | Content |
 |---|---|
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Step-by-step Windows Server install, NSSM service, firewall, TLS, update, operations |
+| [docs/SAP-ABAP-Interface-Spec.md](docs/SAP-ABAP-Interface-Spec.md) | Interface specification for the ABAP developer: endpoints, parameters, SAP field mapping, responses, validations, prerequisites, test checklist (Word copy: `docs/SAP-ABAP-Interface-Spec.docx`) |
 | [docs/api-samples.md](docs/api-samples.md) | Request parameters, sample payloads and responses |
 | [docs/samples/](docs/samples/) | The same samples as JSON files |
 | [postman/FBR-Middleware.postman_collection.json](postman/FBR-Middleware.postman_collection.json) | Postman collection for the middleware: health, dev, prd, every error case |
