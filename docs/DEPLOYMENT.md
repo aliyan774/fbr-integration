@@ -1,359 +1,452 @@
-# Deployment: FBR Middleware on Windows Server
+# Deploying the FBR Middleware on Windows Server
 
-Target: one Windows Server machine (2019 or later), plain Python, run as a Windows service with
-NSSM. No Docker, no Linux. One instance serves both PRAL environments:
+How we run the FBR middleware on the PRL machine, following the same pattern as the OGRA API that
+already runs there: plain Python, supervised by NSSM, configuration in a `.env` file, logs on disk.
+No Docker, no IIS dependency unless TLS is terminated there.
 
-| URL on the middleware | PRAL target |
+Everything here assumes an **elevated PowerShell** on the target machine. The machine already
+hosts `OgraApi` on port 8000 with NSSM at `C:\nssm`, so this guide reuses that NSSM and never
+touches port 8000, the OGRA directory, or the Python the OGRA service uses.
+
+Scripts: `deploy\windows\preflight.ps1` (read-only checks), `deploy\windows\install-service.ps1`
+(does everything in sections 3 to 7), `deploy\windows\uninstall-service.ps1` (reverses it).
+
+---
+
+## 1. What runs the process
+
+A Windows Server has no `systemd`. A process started from a console dies with the session and does
+not return after a reboot, so "it works when I run it" is not a deployment.
+
+| Approach | Fit for this service |
 |---|---|
-| `POST /api/v1/dev/invoices` | sandbox (`..._sb` endpoints, scenarioId required) |
-| `POST /api/v1/prd/invoices` | production (plain endpoints, scenarioId stripped) |
+| **NSSM**, wraps any executable as a service | yes: restarts on crash, captures stdout/stderr, no code changes; same tool as OgraApi |
+| IIS + HttpPlatformHandler | only if IIS is wanted for TLS; it then proxies to the NSSM service, it does not replace it |
+| Task Scheduler at startup | no supervision; a crash stays crashed |
 
-All commands are PowerShell, run as Administrator unless noted.
+The middleware is one Python process: `python.exe -m fbr_middleware` starts uvicorn single-process
+on `LISTEN_HOST:LISTEN_PORT` from `.env`. It handles both PRAL environments through the URL
+(`/api/v1/dev/...` sandbox, `/api/v1/prd/...` production), so one service is enough.
 
-## 1. Prerequisites
+---
 
-| Item | Detail |
-|---|---|
-| Python | 3.12 64-bit from python.org, installed for all users. Not the Microsoft Store build. 3.14 is not supported yet by the pydantic wheels. **If any other Python already exists on the server, install without "Add to PATH"** and use the absolute interpreter path in step 3; the middleware never needs `python` on PATH. |
-| NSSM | `nssm.exe` 2.24 or later (https://nssm.cc), copied to `C:\fbr-middleware\nssm.exe` |
-| Network | Outbound HTTPS from the server to `gw.fbr.gov.pk` (through the corporate proxy if any). Inbound TCP from the SAP application servers to the middleware port. |
-| Service account | A local or domain account with "Log on as a service". Below: `NT SERVICE\FbrMiddleware` (virtual account, created by the service) |
-| Secrets | Middleware API key(s) for SAP. The PRAL tokens are **not** needed on this server; SAP sends them per request. |
-| Certificate | Only if TLS terminates on the middleware (see section 8). |
+## 2. Pre-flight
 
-## 1b. Pre-flight checks (run before anything is installed)
-
-Run `app\deploy\preflight.ps1` (read-only, prints PASS / WARN / FAIL per check), or the
-individual commands below. Every FAIL blocks the install.
-
-**Step 1: inventory the ports in use and choose a free one.** The server already hosts another
-application, so the middleware port must be picked from what is free, not assumed. Run this
-first; the port you choose goes into `LISTEN_PORT` in step 4, the firewall rule in step 7 and the
-IIS proxy target in step 8.
+Run the checks before anything is installed:
 
 ```powershell
-# every TCP port something is listening on, with the owning process
-Get-NetTCPConnection -State Listen |
-  Sort-Object LocalPort -Unique |
-  Select-Object LocalPort, LocalAddress, OwningProcess,
-    @{n="Process";e={(Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue).ProcessName}} |
+cd C:\fbr-middleware; powershell -ExecutionPolicy Bypass -File deploy\windows\preflight.ps1 -Root C:\fbr-middleware -Port 8080
+```
+
+It prints PASS / WARN / FAIL for each item and exits 1 on any FAIL. What it looks at, and why:
+
+| Check | Why it matters here |
+|---|---|
+| Every port already listening, with its process | OgraApi holds 8000; the middleware needs its own port. The script names the first free candidate from 8080, 8443, 8081, 8444 |
+| Python 3.12 64-bit, python.org build | pydantic-core has no wheel for 3.14; the Store build breaks venvs under a service account |
+| Other Python installations on PATH | OgraApi's install script relies on `python` on PATH. **Do not change PATH.** Install 3.12 without "Add to PATH" and point this install at it with `-Python` (section 3) |
+| PyPI reachable | `pip install` needs it; offline wheelhouse procedure in section 11 |
+| `gw.fbr.gov.pk` reachable and resolvable | otherwise every submission ends `FAILED_UPSTREAM`; test from the server, not a workstation |
+| Proxy variables | httpx honours `HTTPS_PROXY`; it must be in the service environment, not only the admin's profile |
+| IIS bindings on 443 | only relevant if IIS terminates TLS; a second site on 443 needs its own host name |
+| Firewall rule name, existing service, NSSM present, disk, clock, time zone | avoid duplicates; `invoiceDate` validation depends on the clock |
+
+Manual equivalents of the two that matter most:
+
+```powershell
+# everything listening, with the owning process (8000 will show OgraApi's python)
+Get-NetTCPConnection -State Listen | Sort-Object LocalPort -Unique |
+  Select-Object LocalPort, LocalAddress, @{n="Process";e={(Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue).ProcessName}} |
   Format-Table -AutoSize
 
-# ports bound by IIS sites, if IIS is installed
-Import-Module WebAdministration -ErrorAction SilentlyContinue; Get-WebBinding | Select-Object protocol, bindingInformation
-
-# candidate port free? (repeat with your choice; no output = free)
-Get-NetTCPConnection -LocalPort 8080 -State Listen -ErrorAction SilentlyContinue
+# the interpreter this service will use; must print 3.12.x and 64
+py -3.12 -c "import sys, struct; print(sys.version, struct.calcsize('P')*8)"
 ```
 
-Pick a port that is not listed and not in the other application's documented range. Suggested
-candidates: 8080 (behind IIS), 8443 (direct TLS), then 8081, 8444. Write the choice down; the
-rest of this guide uses 8080 as the example and every place it appears must carry your value.
+Write the chosen port down. It goes into `.env` (section 3) and nowhere else; the install script
+reads it from there for the port check, the firewall rule and the health check.
+
+---
+
+## 3. Lay out the directory
+
+Outside any user profile, mirroring `C:\ogra-api`:
+
+```
+C:\fbr-middleware\        git checkout of this repository (src\, deploy\, docs\, pyproject.toml)
+  venv\                   created in section 3, used by the service and by operators
+  .env                    settings, ACL-restricted; the only place the port and API keys live
+  data\                   fbr_middleware.db (SQLite), created on first start
+  logs\                   app.log (daily rotation, 30 kept), service.out.log, service.err.log
+```
 
 ```powershell
-# Python: must print 3.12.x, 64-bit, from python.org (not WindowsApps)
-python --version; py -0p
-python -c "import struct, sys; print(struct.calcsize('P')*8, sys.executable)"
-
-# Outbound HTTPS to PyPI: pip install needs it (HTTP 200)
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-Invoke-WebRequest https://pypi.org/simple/pip/ -UseBasicParsing -TimeoutSec 10 | Select-Object StatusCode
-
-# Outbound HTTPS to the PRAL gateway: any HTTP answer (200, 403, 404) proves the route and TLS work;
-# a timeout or "could not resolve" means firewall, proxy or DNS
-Invoke-WebRequest https://gw.fbr.gov.pk -UseBasicParsing -TimeoutSec 10 | Select-Object StatusCode
-Resolve-DnsName gw.fbr.gov.pk
-
-# Proxy: if the site uses one, the service needs HTTPS_PROXY too (step 6)
-Get-ChildItem env: | Where-Object Name -match "PROXY"
-(Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings").ProxyServer
-
-# Listen port free: already covered by step 1 above; re-run it right before the install
-Get-NetTCPConnection -LocalPort <chosen port> -State Listen -ErrorAction SilentlyContinue
-
-# Disk, clock, time zone
-Get-PSDrive C | Select-Object @{n="FreeGB";e={[math]::Round($_.Free/1GB,1)}}
-w32tm /query /status
-Get-TimeZone
+New-Item -ItemType Directory -Force -Path C:\fbr-middleware, C:\fbr-middleware\logs, C:\fbr-middleware\data | Out-Null
+git clone <repo-url> C:\fbr-middleware        # or copy a release folder over AnyDesk
 ```
 
-| Check | Why it matters |
-|---|---|
-| Python 3.12 64-bit | pydantic-core has no wheel for 3.14; the Store build breaks `python -m venv` and service paths |
-| PyPI reachable | `pip install` downloads about 40 packages; without internet, build a wheelhouse on another machine (`pip download -r ...`) and install with `--no-index --find-links` |
-| PRAL gateway reachable | Every submission ends `FAILED_UPSTREAM` otherwise. Test from the server itself, not from a workstation |
-| Proxy | httpx honours `HTTPS_PROXY`; it must be set in the service environment, not only in the admin's profile |
-| Port inventory and a free port | another application is already on this server; a clash means uvicorn fails to bind and NSSM restarts the service in a loop, or the other application stops answering after a reboot race |
-| Disk space | SQLite file plus 30 days of logs plus the venv: 5 GB is comfortable |
-| Clock and time zone | `invoiceDate` must not be in the future and PRAL's `dated` is compared by operators; the server should sync to a domain or NTP source |
-| Admin shell | service install, `icacls`, firewall rule |
-
-If pip cannot reach PyPI, prepare the packages offline:
+Create the venv **inside** the directory from the 3.12 interpreter. On this machine `python` on
+PATH belongs to the OGRA deployment, so name the interpreter explicitly:
 
 ```powershell
-# on a machine with internet (same Python 3.12 64-bit)
-python -m pip download -d .\wheelhouse -e .\app
-# on the server
-.\.venv\Scripts\python.exe -m pip install --no-index --find-links .\wheelhouse -e .\app
-```
-
-## 1c. Coexistence with other software on the server
-
-The deployment is self-contained. What it adds and what it never touches:
-
-| Adds | Never touches |
-|---|---|
-| folder `C:\fbr-middleware` with its own venv | the system Python packages of any other application |
-| one service `FbrMiddleware` (one process, about 100-150 MB RAM) | other services, scheduled tasks, the registry |
-| one listening port (8080 behind IIS, or 8443) | ports of other applications |
-| one inbound firewall rule scoped to the SAP server IPs | existing rules |
-| optional IIS site for TLS | existing IIS sites, if the new site uses its own host name or port |
-| outbound HTTPS to `gw.fbr.gov.pk` only | other outbound traffic |
-
-The only system-wide change is the Python 3.12 installer. With "Add to PATH" ticked it becomes
-the `python` that other scripts and services on the box resolve to. On a shared server install it
-without that option and create the venv from the absolute path:
-
-```powershell
-& "C:\Program Files\Python312\python.exe" -m venv C:\fbr-middleware\.venv
-```
-
-Checks 13 to 15 of `preflight.ps1` (section 1b) list other Python installations, existing IIS bindings on 443,
-the firewall rule and other Python or NSSM services, so port and folder clashes are seen before
-anything is installed.
-
-## 2. Layout
-
-```
-C:\fbr-middleware\
-  app\            the repository (src\, tools\, pyproject.toml, README.md, docs\)
-  .venv\          Python virtual environment
-  data\           fbr_middleware.db (SQLite)
-  logs\           app.log (live), app-YYYY-MM-DD.log (30 days kept), service-out.log, service-err.log
-  .env            settings, readable only by the service account and Administrators
-  nssm.exe
-```
-
-## 3. Install the application
-
-```powershell
-New-Item -ItemType Directory -Force C:\fbr-middleware, C:\fbr-middleware\data, C:\fbr-middleware\logs | Out-Null
 cd C:\fbr-middleware
-
-# Copy or clone the release into .\app
-git clone <repo-url> app          # or copy the folder over AnyDesk / file share
-
-python --version                  # must print 3.12.x
-python -m venv .venv                       # or: & "C:\Program Files\Python312\python.exe" -m venv .venv (shared server, Python not on PATH)
-.\.venv\Scripts\python.exe -m pip install --upgrade pip
-.\.venv\Scripts\python.exe -m pip install -e .\app          # add ".\app[postgres]" for PostgreSQL
+py -3.12 -m venv venv                                  # or: & "C:\Program Files\Python312\python.exe" -m venv venv
+.\venv\Scripts\python.exe -m pip install --upgrade pip
+.\venv\Scripts\python.exe -m pip install -e .
+.\venv\Scripts\python.exe -m pip check
+.\venv\Scripts\python.exe -c "import fbr_middleware; print(fbr_middleware.__version__)"
 ```
 
-Smoke test the install (no service yet):
+### Configuration and secrets
 
 ```powershell
-.\.venv\Scripts\python.exe -c "import fbr_middleware; print(fbr_middleware.__version__)"
-```
-
-## 4. Configure `.env`
-
-```powershell
-Copy-Item .\app\.env.example .\.env
-notepad .\.env
+Copy-Item .env.example .env; notepad .env
 ```
 
 Production values:
 
 ```ini
 FBR_BASE_URL=https://gw.fbr.gov.pk
-FBR_ENABLED_ENVS=dev,prd            # "dev" only on a box that must never reach production
+FBR_ENABLED_ENVS=dev,prd              # "dev" only on a box that must never reach production
 FBR_TIMEOUT_SECONDS=30
 FBR_MAX_RETRIES_5XX=3
 MAX_INFLIGHT_PER_SELLER=1
 MAX_INFLIGHT_TOTAL=50
 MIDDLEWARE_API_KEYS=<long random key for SAP PRD>,<key for SAP QAS>
-DATABASE_URL=sqlite+aiosqlite:///C:/fbr-middleware/data/fbr_middleware.db
-LOG_DIR=C:\fbr-middleware\logs
+DATABASE_URL=sqlite+aiosqlite:///./data/fbr_middleware.db
+LOG_DIR=./logs
 LOG_LEVEL=INFO
-LISTEN_HOST=127.0.0.1               # behind IIS; 0.0.0.0 if SAP calls the port directly
-LISTEN_PORT=8080                    # the free port chosen in section 1b, step 1
+LISTEN_HOST=0.0.0.0                   # 127.0.0.1 when IIS on this box is the only caller
+LISTEN_PORT=8080                      # the free port from section 2; never 8000
 ```
 
 Generate a key: `[Convert]::ToBase64String((1..48 | % { Get-Random -Max 256 }) -as [byte[]])`.
+Leave `FBR_DEV_BASE_URL` and `FBR_PRD_BASE_URL` unset; they exist to point `dev` at the local mock
+during development. PRAL tokens are never stored on this server; SAP sends them per request.
 
-Leave `FBR_DEV_BASE_URL` / `FBR_PRD_BASE_URL` unset on the server; they exist to point `dev` at
-the local mock during development.
-
-Restrict the file:
-
-```powershell
-icacls C:\fbr-middleware\.env /inheritance:r /grant:r "NT SERVICE\FbrMiddleware:R" "Administrators:F"
-```
-
-(`NT SERVICE\FbrMiddleware` resolves only after the service exists; run this again after step 6
-if it errors now.)
-
-## 5. First run in the foreground
+Keep secrets in this file, never in the service definition: arguments passed to NSSM are visible in
+the registry and in `Get-CimInstance Win32_Service`. Strip inherited permissions so the file is not
+readable by every account on the box (the service account is granted in section 6):
 
 ```powershell
-cd C:\fbr-middleware\app
-$env:ENV_FILE = "C:\fbr-middleware\.env"
-..\.venv\Scripts\python.exe -m fbr_middleware
+icacls C:\fbr-middleware\.env /inheritance:r /grant:r "Administrators:(R,W)" /grant:r "SYSTEM:(R)" /grant:r "NETWORK SERVICE:(R)"
 ```
 
-In a second window:
+### Prove it in the foreground once
+
+```powershell
+cd C:\fbr-middleware; .\venv\Scripts\python.exe -m fbr_middleware
+```
+
+In a second window `Invoke-RestMethod http://localhost:8080/health` must show `status: ok`,
+`db: ok` and both `dev` and `prd` under `environments` with the PRAL URLs. Ctrl+C to stop. A
+service that fails to start is far harder to diagnose than a console run, so do this first.
+
+---
+
+## 4. Choose and open the port
+
+Check nothing holds the port from `.env`, and only then open the firewall:
+
+```powershell
+Get-NetTCPConnection -LocalPort 8080 -State Listen -ErrorAction SilentlyContinue | Select-Object OwningProcess, State
+```
+
+Empty output means free. If something answers, find out what and pick another port in `.env`:
+
+```powershell
+Get-Process -Id (Get-NetTCPConnection -LocalPort 8080 -State Listen).OwningProcess
+```
+
+### Bind address
+
+`LISTEN_HOST=0.0.0.0` listens on every interface; `127.0.0.1` only to the machine itself. Bind to
+`127.0.0.1` when IIS on the same box is the only caller (section 8): then no firewall rule is needed
+and the service cannot be reached directly even by accident.
+
+### Firewall
+
+```powershell
+New-NetFirewallRule -DisplayName "FBR Middleware" -Direction Inbound -Protocol TCP -LocalPort 8080 -Action Allow -Profile Domain,Private
+Set-NetFirewallRule -DisplayName "FBR Middleware" -RemoteAddress 10.0.0.11,10.0.0.12     # the SAP application servers
+Get-NetFirewallRule -DisplayName "FBR Middleware" | Get-NetFirewallPortFilter
+```
+
+`-Profile Domain,Private` is deliberate: without it the port is open on `Public` too. Restricting
+`RemoteAddress` to the SAP servers is the second line; the API key is the third.
+
+---
+
+## 5. NSSM
+
+OgraApi already installed NSSM 2.24 at `C:\nssm\nssm.exe`; reuse it. If it is missing:
+
+```powershell
+Invoke-WebRequest -Uri https://nssm.cc/release/nssm-2.24.zip -OutFile $env:TEMP\nssm.zip -UseBasicParsing
+Expand-Archive -Path $env:TEMP\nssm.zip -DestinationPath $env:TEMP\nssm-extract -Force
+New-Item -ItemType Directory -Force -Path C:\nssm | Out-Null
+Copy-Item $env:TEMP\nssm-extract\nssm-2.24\win64\nssm.exe C:\nssm\nssm.exe -Force
+```
+
+One self-contained executable; nothing to uninstall, and one copy serves every service on the box.
+
+---
+
+## 6. Register the service
+
+`deploy\windows\install-service.ps1` runs all of this (section 12). The commands, for the record
+and for when something has to be changed by hand:
+
+```powershell
+$nssm = "C:\nssm\nssm.exe"
+$app  = "C:\fbr-middleware"
+
+& $nssm install FbrMiddleware "$app\venv\Scripts\python.exe" "-m fbr_middleware"
+& $nssm set FbrMiddleware AppDirectory  $app
+& $nssm set FbrMiddleware DisplayName   "FBR Digital Invoicing Middleware"
+& $nssm set FbrMiddleware Description   "SAP -> PRAL Digital Invoicing pass-through (dev + prd). Owner: integration team"
+& $nssm set FbrMiddleware Start         SERVICE_AUTO_START
+```
+
+The executable is the real `python.exe` in the venv, not a `.bat`: a batch file exits as soon as
+it has launched Python and NSSM then restarts it forever.
+
+**`AppDirectory` is not optional.** Without it the process starts in `C:\Windows\System32` and the
+relative paths in `.env` (`./data`, `./logs`) and `.env` itself silently resolve to the wrong place.
+
+### Restart behaviour
+
+```powershell
+& $nssm set FbrMiddleware AppExit         Default Restart
+& $nssm set FbrMiddleware AppRestartDelay 3000
+& $nssm set FbrMiddleware AppThrottle     5000
+& $nssm set FbrMiddleware AppStopMethodSkip 6          # Ctrl+C first, let uvicorn finish in-flight PRAL calls
+& $nssm set FbrMiddleware AppStopMethodConsole 30000
+```
+
+`AppThrottle` is the one that matters: if the process dies within 5 s of starting, NSSM backs off
+instead of spinning. Without it a bad `.env` produces thousands of restarts a minute.
+
+### Logs
+
+NSSM captures stdout and stderr, the only place a startup exception appears. Set rotation when you
+set the path, not later.
+
+```powershell
+& $nssm set FbrMiddleware AppStdout       "$app\logs\service.out.log"
+& $nssm set FbrMiddleware AppStderr       "$app\logs\service.err.log"
+& $nssm set FbrMiddleware AppRotateFiles  1
+& $nssm set FbrMiddleware AppRotateOnline 1
+& $nssm set FbrMiddleware AppRotateBytes  10485760
+```
+
+The application's own log, `logs\app.log`, is written by the middleware with daily rotation and
+the Authorization-redaction filter; `service.*.log` only hold what uvicorn prints to the console.
+
+### Environment variables
+
+```powershell
+& $nssm set FbrMiddleware AppEnvironmentExtra "PYTHONUNBUFFERED=1" "TZ=Asia/Karachi"
+# with a corporate proxy:
+& $nssm set FbrMiddleware AppEnvironmentExtra "PYTHONUNBUFFERED=1" "TZ=Asia/Karachi" "HTTPS_PROXY=http://proxy.corp:8080" "NO_PROXY=localhost,127.0.0.1"
+```
+
+`PYTHONUNBUFFERED=1` so a crash does not lose the lines that explain it. `TZ=Asia/Karachi` because
+the "invoice date not in the future" rule and PRAL's `dated` are Pakistan dates.
+
+### Which account it runs as
+
+Not `LocalSystem`. The service needs its own directory and a port, nothing more:
+
+```powershell
+& $nssm set FbrMiddleware ObjectName "NT AUTHORITY\NetworkService" ""
+icacls C:\fbr-middleware /grant "NETWORK SERVICE:(OI)(CI)(M)"
+```
+
+The `.env` ACL from section 3 already grants `NETWORK SERVICE` read.
+
+---
+
+## 7. Start it, and prove it
+
+```powershell
+Start-Service FbrMiddleware; Start-Sleep 5; Get-Service FbrMiddleware
+```
+
+`Running` is necessary but not sufficient; NSSM reports Running while the app inside crash-loops.
+Check the app itself:
 
 ```powershell
 Invoke-RestMethod http://localhost:8080/health | ConvertTo-Json -Depth 4
+Get-Content C:\fbr-middleware\logs\service.err.log -Tail 40
 ```
 
-Expect `status: ok`, `db: ok` and both `dev` and `prd` under `environments` with the PRAL URLs.
-Stop the foreground process with Ctrl+C.
-
-## 6. Install the Windows service
-
-Either run `app\deploy\install-service.ps1` or the commands below.
-
-```powershell
-cd C:\fbr-middleware
-.\nssm.exe install FbrMiddleware "C:\fbr-middleware\.venv\Scripts\python.exe" "-m fbr_middleware"
-.\nssm.exe set FbrMiddleware AppDirectory C:\fbr-middleware\app
-.\nssm.exe set FbrMiddleware AppEnvironmentExtra ENV_FILE=C:\fbr-middleware\.env
-.\nssm.exe set FbrMiddleware DisplayName "FBR Digital Invoicing Middleware"
-.\nssm.exe set FbrMiddleware Description "SAP -> PRAL pass-through (dev + prd)"
-.\nssm.exe set FbrMiddleware AppStdout C:\fbr-middleware\logs\service-out.log
-.\nssm.exe set FbrMiddleware AppStderr C:\fbr-middleware\logs\service-err.log
-.\nssm.exe set FbrMiddleware AppRotateFiles 1
-.\nssm.exe set FbrMiddleware AppRotateBytes 10485760
-.\nssm.exe set FbrMiddleware AppStopMethodSkip 6      # send Ctrl+C only, let uvicorn finish in-flight calls
-.\nssm.exe set FbrMiddleware AppStopMethodConsole 30000
-.\nssm.exe set FbrMiddleware Start SERVICE_AUTO_START
-.\nssm.exe set FbrMiddleware AppExit Default Restart
-.\nssm.exe set FbrMiddleware AppRestartDelay 5000
-.\nssm.exe start FbrMiddleware
-.\nssm.exe status FbrMiddleware
-```
-
-If the site uses an outbound proxy:
-
-```powershell
-.\nssm.exe set FbrMiddleware AppEnvironmentExtra ENV_FILE=C:\fbr-middleware\.env HTTPS_PROXY=http://proxy.corp:8080 NO_PROXY=localhost,127.0.0.1
-```
-
-Grant the data and log folders to the service account:
-
-```powershell
-icacls C:\fbr-middleware\data /grant "NT SERVICE\FbrMiddleware:(OI)(CI)M"
-icacls C:\fbr-middleware\logs /grant "NT SERVICE\FbrMiddleware:(OI)(CI)M"
-.\nssm.exe restart FbrMiddleware
-```
-
-## 7. Firewall
-
-Allow only the SAP application servers:
-
-```powershell
-New-NetFirewallRule -DisplayName "FBR Middleware" -Direction Inbound -Protocol TCP -LocalPort 443 `
-  -RemoteAddress 10.0.0.11,10.0.0.12 -Action Allow
-```
-
-Use port 443 when IIS fronts the service, otherwise the `LISTEN_PORT` value chosen in section
-1b. If the other application already owns 443 in IIS, give the middleware site its own host name
-(SNI binding) or a second HTTPS port such as 8443, and open that one instead.
-
-## 8. TLS
-
-SAP's SM59 destination should use HTTPS. Pick one:
-
-**A. IIS reverse proxy (recommended).** Install IIS with URL Rewrite and Application Request
-Routing. Bind the company certificate on 443. Add a site with a reverse-proxy rule to
-`http://localhost:8080/`. In ARR set the proxy timeout to 180 seconds (PRAL worst case is about
-100 s per submission) and disable response buffering. Keep `LISTEN_HOST=127.0.0.1`.
-
-**B. uvicorn with the certificate.** Export the certificate and key as PEM, then in `.env`:
-
-```ini
-LISTEN_HOST=0.0.0.0
-LISTEN_PORT=8443
-SSL_CERTFILE=C:\fbr-middleware\cert.pem
-SSL_KEYFILE=C:\fbr-middleware\key.pem
-```
-
-Restart the service after every certificate renewal.
-
-## 9. Verify
-
-```powershell
-Invoke-RestMethod https://<host>/health | ConvertTo-Json -Depth 4
-```
-
-Then submit the sample invoice to `dev` with a real sandbox token (body in
-`app\docs\samples\sale-invoice-dev.json`):
+Then one real submission to `dev` with the sandbox token, body from `docs\samples\sale-invoice-dev.json`:
 
 ```powershell
 $headers = @{ "X-API-Key" = "<key>"; "Authorization" = "Bearer <sandbox token>"; "Content-Type" = "application/json" }
-$body = Get-Content C:\fbr-middleware\app\docs\samples\sale-invoice-dev.json -Raw
-Invoke-RestMethod -Method Post -Uri https://<host>/api/v1/dev/invoices -Headers $headers -Body $body | ConvertTo-Json -Depth 10
+$body = Get-Content C:\fbr-middleware\docs\samples\sale-invoice-dev.json -Raw
+Invoke-RestMethod -Method Post -Uri http://localhost:8080/api/v1/dev/invoices/validate -Headers $headers -Body $body | Select-Object status, errorDescriptions
+Invoke-RestMethod -Method Post -Uri http://localhost:8080/api/v1/dev/invoices -Headers $headers -Body $body | Select-Object status, fbrInvoiceNo, trackingId
 ```
 
-Expect HTTP 201 and `status: SUBMITTED`. The same call again returns 200 with `replayed: true`.
-Import `app\postman\FBR-Middleware.postman_collection.json` into Postman for the full set of
-calls (health, dev, prd, every error case).
+Expect `VALIDATED`, then `SUBMITTED` with an FBR number. The same POST again returns 200 with
+`replayed: true`. From an SAP application server, repeat the health call against the server's
+address to prove the firewall rule. Import `postman\FBR-Middleware.postman_collection.json` for the
+full set.
 
-## 10. SAP side checklist
+**When the service will not start, read `service.err.log` first.** It holds the traceback, the
+missing-module error, the port conflict. The Windows Event Log only records that the process exited.
 
-- SM59 destination type G: host, port 443, SSL active, path prefix empty.
-- Headers per call: `X-API-Key` (static, from the destination or the client class) and
-  `Authorization: Bearer <token>` read from `ZFBR_TOKEN` by `SELLER_NTN` and `ENV`.
-- Path per environment: `/api/v1/dev/invoices` while certifying, `/api/v1/prd/invoices` after
-  the production token is issued. The `ENV` key that selects the token also selects the path.
-- HTTP client timeout at least 120 s.
-- Handle 201 / 200 / 422 / 502 / 504 / 401 as in README.md "Outcomes". On 504 or a client-side
-  timeout call `GET /api/v1/{env}/invoices/{erpInvoiceNo}` before any resubmit.
+---
 
-## 11. Updating a release
+## 8. TLS
+
+SAP's SM59 destination should use HTTPS. Two options:
+
+- **IIS as reverse proxy.** Install IIS with URL Rewrite and Application Request Routing, bind the
+  company certificate on 443 (own host name if OgraApi or another site already uses 443), reverse
+  proxy to `http://localhost:8080/`, ARR proxy timeout **200 s** (a submission can take two PRAL
+  calls with retries), response buffering off. Set `LISTEN_HOST=127.0.0.1` and skip the firewall
+  rule for 8080; open 443 instead.
+- **uvicorn with the certificate.** Export the certificate and key as PEM and set in `.env`:
+  `LISTEN_PORT=8443`, `SSL_CERTFILE=C:\fbr-middleware\cert.pem`, `SSL_KEYFILE=C:\fbr-middleware\key.pem`.
+  Restart the service after every renewal.
+
+---
+
+## 9. SAP side
+
+Covered in `docs\SAP-ABAP-Interface-Spec.md` section 8: SM59 destination type G to this host and
+port, STRUST import of the certificate chain, `ZFBR_TOKEN` for the PRAL tokens, client timeout at
+least 200 s, and GET before any resend after a 504 or a timeout.
+
+---
+
+## 10. Day-to-day
 
 ```powershell
-cd C:\fbr-middleware
-.\nssm.exe stop FbrMiddleware
-Copy-Item -Recurse -Force C:\fbr-middleware\data C:\fbr-middleware\backup\data-$(Get-Date -Format yyyyMMdd-HHmm)
-cd app; git pull; cd ..                 # or replace the folder
-.\.venv\Scripts\python.exe -m pip install -e .\app
-.\nssm.exe start FbrMiddleware
-Invoke-RestMethod http://localhost:8080/health
+Restart-Service FbrMiddleware                                   # after a deploy or an .env change
+Stop-Service FbrMiddleware; Start-Service FbrMiddleware         # when a restart hangs
+Get-Service FbrMiddleware | Select-Object Status, StartType
+Get-Content C:\fbr-middleware\logs\service.err.log -Tail 50 -Wait   # follow the console log
+Get-Content C:\fbr-middleware\logs\app.log -Tail 50 -Wait           # follow the application log, search by trackingId
+& C:\nssm\nssm.exe dump FbrMiddleware                               # how the service is really registered
 ```
 
-Tables are created on start if missing. A release that changes an existing table ships a note
-in its README; until Alembic is added, apply such changes by hand after the backup.
+### A routine deploy
 
-Rollback: stop the service, `git checkout <previous tag>` (or restore the folder), reinstall
-with pip, restore `data\` from the backup if the schema changed, start the service.
+```powershell
+Stop-Service FbrMiddleware
+Copy-Item -Recurse -Force C:\fbr-middleware\data C:\fbr-middleware\backup\data-$(Get-Date -Format yyyyMMdd-HHmm)
+cd C:\fbr-middleware; git pull
+.\venv\Scripts\python.exe -m pip install -e .; .\venv\Scripts\python.exe -m pip check
+Start-Service FbrMiddleware
+git -C C:\fbr-middleware log -1 --oneline; Get-Service FbrMiddleware; Invoke-RestMethod http://localhost:8080/health
+```
 
-## 12. Operations
+Confirm the running process has the new code: a restart that silently failed looks exactly like a
+successful one. Tables are created on start if missing; a release that changes an existing table
+says so in its README and, until Alembic is added, is applied by hand after the backup. Rollback:
+stop, `git checkout <previous tag>`, reinstall, restore `data\` if the schema changed, start.
+
+### Operations
 
 | Topic | Where / how |
 |---|---|
-| Application log | `C:\fbr-middleware\logs\app.log`, one line per step with `trackingId`; rotated at midnight, 30 days |
-| Service stdout/stderr | `service-out.log`, `service-err.log` (uvicorn start-up errors land here) |
-| Health | `GET /health`: `db`, `inflight`, PRAL URLs per environment. Point the monitoring tool at it. |
-| Database | `data\fbr_middleware.db`. Back up with the normal server backup (VSS-aware tool). Rows: `invoices`, `attempts`. |
-| UNKNOWN invoices | `SELECT env, erp_invoice_no, tracking_id, received_at FROM invoices WHERE status='UNKNOWN'`. Reconcile on the FBR portal; resubmission is blocked until an operator clears the row (admin endpoint is a TODO). |
-| Token problems | `status = AUTH_ERROR` means PRAL rejected the token SAP sent. Fix `ZFBR_TOKEN` in SAP; nothing to change on this server. |
-| Secrets hygiene | The token never appears in logs or the DB. A log line containing `Authorization` or a bearer value is an incident: the redaction filter is broken. |
-| Clock | `invoiceDate` validation and PRAL's `dated` depend on the server clock; keep NTP in sync. |
-| Reboots | Windows Update restarts the service. Calls in flight at that moment return an error to ABAP and must be resubmitted (or looked up via GET first). |
+| Application log | `logs\app.log`, one line per step with `trackingId`; rotated at midnight, 30 days kept |
+| Console log | `logs\service.out.log`, `logs\service.err.log`, rotated at 10 MB by NSSM |
+| Health | `GET /health`: `db`, `inflight`, PRAL URLs per environment. Point the monitoring tool at it |
+| Database | `data\fbr_middleware.db`. Back up with a VSS-aware tool. Tables `invoices`, `attempts` |
+| UNKNOWN invoices | `SELECT env, erp_invoice_no, tracking_id, received_at FROM invoices WHERE status='UNKNOWN'`; reconcile on the FBR portal; the row blocks resubmission until cleared (admin endpoint is a TODO) |
+| Token problems | `AUTH_ERROR` means PRAL rejected the token SAP sent; fix `ZFBR_TOKEN` in SAP, nothing on this server |
+| Secrets hygiene | the token never appears in logs or the DB; a log line containing `Authorization` or a bearer value is an incident |
+| Key rotation | add the new key to `MIDDLEWARE_API_KEYS`, restart, switch SAP, remove the old key, restart |
 
-## 13. Troubleshooting
+### Removing it
 
-| Symptom | Cause / fix |
-|---|---|
-| Service stops immediately | Check `service-err.log`. Usually a bad `.env` value (e.g. `FBR_ENABLED_ENVS` typo) or the `.env` ACL denies the service account. |
-| `/health` shows `db: error` | Service account lacks write access to `data\`, or the path in `DATABASE_URL` does not exist. |
-| 404 on `/api/v1/prd/invoices` | `FBR_ENABLED_ENVS` does not include `prd`. |
-| Service starts then stops within seconds, `service-err.log` says "address already in use" / `WinError 10048` | `LISTEN_PORT` collides with the other application. Re-run the port inventory in section 1b and pick another port. |
-| Every call ends FAILED_UPSTREAM | No outbound route to `gw.fbr.gov.pk`: proxy variables, firewall, or DNS. Test with `Invoke-WebRequest https://gw.fbr.gov.pk/ -UseBasicParsing`. |
-| AUTH_ERROR for one NTN only | Token for that NTN is wrong, expired, or issued for the other environment (sandbox token on `prd` or vice versa). |
-| ABAP reports timeouts but the middleware logs SUBMITTED | ABAP/IIS timeout too short. Raise to at least 120 s (ARR: 180 s) and have ABAP call GET before resubmitting. |
-| `pip install` fails on `pydantic-core` | Wrong Python (3.14 or 32-bit). Install 3.12 64-bit and recreate `.venv`. |
-| `pip install` hangs or "connection timed out" | No route to PyPI from the server. Set `HTTPS_PROXY` in the shell, or use the offline wheelhouse from section 1a. |
-| `Invoke-WebRequest` to PyPI or PRAL fails with "underlying connection was closed" | TLS 1.2 not enabled in the session or the OS. Run the `SecurityProtocol` line from section 1a; on Server 2012 R2 enable TLS 1.2 in the registry. |
+```powershell
+cd C:\fbr-middleware; powershell -ExecutionPolicy Bypass -File deploy\windows\uninstall-service.ps1
+```
+
+Stops and removes the service and the firewall rule; the directory, `.env` and database stay.
+
+---
+
+## 11. Things that cost us time
+
+**Port 8000 is OgraApi's.** The middleware defaults to 8080 and the install script refuses to
+register the service while something else listens on `LISTEN_PORT`. If the service starts and dies
+within seconds and `service.err.log` says `WinError 10048` / "address already in use", the port in
+`.env` collides with another application.
+
+**`python` on PATH is not ours.** OgraApi's installer uses `python` from PATH. Installing 3.12 with
+"Add to PATH" would silently change which interpreter that service and its deploy script use. Install
+3.12 without that option, use `py -3.12` or the absolute path, and pass `-Python` to our install script.
+
+**Python 3.14 has no pydantic-core wheel.** `pip install` ends in `ResolutionImpossible`. Use 3.12.
+
+**PowerShell is not bash.** `&&` and `||` are parser errors in Windows PowerShell 5.1; use `;` or
+`if ($?) { ... }`. `curl` is an alias for `Invoke-WebRequest`; call `curl.exe` when you mean curl.
+`Invoke-RestMethod` throws on 4xx/5xx; wrap in `try { } catch { $_.ErrorDetails.Message }` to see
+the envelope of a 422 or 502.
+
+**TLS 1.2.** On an older server `Invoke-WebRequest` to PyPI or PRAL fails with "underlying
+connection was closed" until `[Net.ServicePointManager]::SecurityProtocol = 'Tls12'` is set in the
+session (and enabled in the OS for Server 2012 R2).
+
+**No route to PyPI.** Build a wheelhouse on a machine with internet and the same Python:
+`py -3.12 -m pip download -d .\wheelhouse -e .` then on the server
+`.\venv\Scripts\python.exe -m pip install --no-index --find-links .\wheelhouse -e .`.
+
+**A dependency conflict can hide from `pip install`.** `pip check` reports it; pin the transitive
+package in `pyproject.toml` once hit.
+
+**A pull run as the wrong user leaves files that user owns.** The service account then cannot write
+`data\` or `logs\`; the symptom is a permission error at startup. Re-run the `icacls` grant.
+
+**A service does not pick up `.env` changes until it restarts.** Editing the file and re-running a
+health check proves nothing. This includes API keys.
+
+**Timeouts are long.** Worst case per submission is about 200 s (two PRAL calls, three attempts each,
+backoff). ABAP's client timeout and any IIS ARR timeout must exceed that, or SAP sees a timeout while
+the middleware completes and stores a result; SAP must then call GET before resubmitting.
+
+**Check the reverse proxy points where you think.** Restarting the service while testing through
+IIS can mean restarting one instance and testing another.
+
+**Every submission ends `FAILED_UPSTREAM`.** No outbound route to `gw.fbr.gov.pk`: proxy variables
+missing from the service environment, firewall, or DNS. `Invoke-WebRequest https://gw.fbr.gov.pk -UseBasicParsing`
+from the server (any HTTP answer, even 404, proves the route).
+
+**`AUTH_ERROR` for one NTN only.** The token for that NTN is wrong, expired, or issued for the other
+environment (sandbox token on `prd` or the reverse).
+
+---
+
+## 12. The scripts
+
+`deploy\windows\install-service.ps1` does sections 3 to 7 for this project: admin check, 3.12
+interpreter check, venv and `pip install -e .`, NSSM (reuse `C:\nssm` or download), port check
+against `LISTEN_PORT` from `.env`, service registration with restart, throttle, log rotation,
+environment variables and the `NETWORK SERVICE` account, ACLs, the firewall rule, start, and a
+`/health` check. Run it elevated from the app directory:
+
+```powershell
+cd C:\fbr-middleware
+powershell -ExecutionPolicy Bypass -File deploy\windows\install-service.ps1 -Python "C:\Program Files\Python312\python.exe" -SapServers 10.0.0.11,10.0.0.12
+```
+
+It refuses to run without `C:\fbr-middleware\.env`, with an empty or default `MIDDLEWARE_API_KEYS`,
+or while another process listens on `LISTEN_PORT`. That is deliberate: a service that starts
+without its configuration, or on another application's port, is worse than one that will not start.
+
+Parameters, if the defaults do not suit:
+
+```powershell
+.\deploy\windows\install-service.ps1 -AppDir C:\other -ServiceName OtherFbr -NssmDir C:\nssm -Python <python.exe> -SapServers <ip,ip> -HttpsProxy http://proxy:8080 -SkipFirewall
+```
+
+`-SkipFirewall` when IIS fronts the service and `LISTEN_HOST` is `127.0.0.1`.
+`deploy\windows\uninstall-service.ps1 -ServiceName FbrMiddleware` reverses the service and firewall
+parts. `deploy\windows\preflight.ps1` is section 2 and changes nothing.

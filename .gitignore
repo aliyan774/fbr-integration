@@ -8,6 +8,7 @@ dist/
 
 # Virtual environment
 .venv/
+venv/
 
 # Local config and data
 .env

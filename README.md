@@ -21,7 +21,7 @@ Documents:
 
 | Document | Content |
 |---|---|
-| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Step-by-step Windows Server install, NSSM service, firewall, TLS, update, operations |
+| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Windows Server deployment: pre-flight, layout, port and firewall, NSSM service, verification, day-to-day, lessons learned |
 | [docs/SAP-ABAP-Interface-Spec.md](docs/SAP-ABAP-Interface-Spec.md) | Interface specification for the ABAP developer: endpoints, parameters, SAP field mapping, responses, validations, prerequisites, test checklist (Word copy: `docs/SAP-ABAP-Interface-Spec.docx`) |
 | [docs/api-samples.md](docs/api-samples.md) | Request parameters, sample payloads and responses |
 | [docs/samples/](docs/samples/) | The same samples as JSON files |
@@ -29,8 +29,8 @@ Documents:
 | [postman/FBR-Digital-Invoicing.postman_collection.json](postman/FBR-Digital-Invoicing.postman_collection.json) | PRAL's own endpoints (spec samples), for direct sandbox tests |
 | [docs/middleware-flow.md](docs/middleware-flow.md) | Design: flow, contract, token handling |
 | [docs/FBR-DI-API-Analysis.md](docs/FBR-DI-API-Analysis.md) | Analysis of the PRAL spec v1.12 |
-| [deploy/preflight.ps1](deploy/preflight.ps1) | Read-only pre-flight checks: Python, PyPI, PRAL reachability, proxy, port, disk, clock |
-| [deploy/install-service.ps1](deploy/install-service.ps1) | NSSM service installer used in the deployment guide |
+| [deploy/windows/preflight.ps1](deploy/windows/preflight.ps1) | Read-only pre-flight checks: ports in use, Python, PyPI, PRAL reachability, proxy, disk, clock |
+| [deploy/windows/install-service.ps1](deploy/windows/install-service.ps1) | End-to-end installer: venv, NSSM, port check, service, firewall, health; `uninstall-service.ps1` reverses it |
 
 Target platform is Windows Server with plain Python 3.12 (no Docker, no Linux). Everything below
 is PowerShell.
@@ -231,8 +231,9 @@ header authentication, lookup, and that the token never reaches logs or the data
 
 ## Windows service
 
-See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). `deploy\install-service.ps1` registers the NSSM
-service; `python -m fbr_middleware` is the service command and `ENV_FILE` points it at the `.env`.
+See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). `deploy\windows\install-service.ps1` builds the venv and
+registers the NSSM service; `python -m fbr_middleware` is the service command, run from the app
+directory where `.env` lives.
 
 ## Not implemented yet (stubs / TODO)
 

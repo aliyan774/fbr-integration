@@ -3,9 +3,12 @@
     Pre-flight checks for deploying the FBR Middleware on a Windows Server.
 
 .DESCRIPTION
-    Read-only. Verifies everything the install needs before you start: Python version, PyPI
-    reachability (pip install), outbound reach to the PRAL gateway, proxy settings, TLS 1.2,
-    free listen port, NSSM, disk space, clock sync, PowerShell version and admin rights.
+    Read-only. Verifies everything the install needs before you start: ports already in use
+    (another application runs on this server), Python version, PyPI reachability (pip install),
+    outbound reach to the PRAL gateway, proxy settings, TLS 1.2, NSSM, disk space, clock sync,
+    PowerShell version and admin rights. Layout per docs\DEPLOYMENT.md: the repo at -Root with
+    venv\ and .env inside it, NSSM shared at C:
+ssm.
     Prints PASS / WARN / FAIL per check and exits 1 if any check failed.
 
 .EXAMPLE
@@ -17,6 +20,7 @@ param(
     [string]$Root = "C:\fbr-middleware",
     [int]$Port = 8080,
     [string]$FbrHost = "gw.fbr.gov.pk",
+    [string]$NssmDir = "C:\nssm",
     [int]$MinFreeGB = 5
 )
 
@@ -113,8 +117,13 @@ Report "PASS" "Existing FbrMiddleware service" $(if ($svc) { "present ($($svc.St
 
 # 10. Root folder and NSSM
 Report ($(if (Test-Path $Root) { "PASS" } else { "WARN" })) "Root folder $Root" $(if (Test-Path $Root) { "exists" } else { "will be created by the install steps" })
-$nssm = Join-Path $Root "nssm.exe"
-Report ($(if (Test-Path $nssm) { "PASS" } else { "WARN" })) "NSSM present" $(if (Test-Path $nssm) { $nssm } else { "copy nssm.exe to $Root before installing the service" })
+$nssmCmd = Get-Command nssm -ErrorAction SilentlyContinue
+$nssm = if ($nssmCmd) { $nssmCmd.Source } elseif (Test-Path (Join-Path $NssmDir "nssm.exe")) { Join-Path $NssmDir "nssm.exe" } else { $null }
+Report ($(if ($nssm) { "PASS" } else { "WARN" })) "NSSM present" $(if ($nssm) { "$nssm (shared with other services)" } else { "not at $NssmDir or on PATH; install-service.ps1 downloads 2.24" })
+$appPresent = (Test-Path (Join-Path $Root "pyproject.toml")) -and (Test-Path (Join-Path $Root "src\fbr_middleware\main.py"))
+Report ($(if ($appPresent) { "PASS" } else { "WARN" })) "Repository at $Root" $(if ($appPresent) { "found" } else { "clone or copy the repository there before install" })
+$envPath = Join-Path $Root ".env"
+Report ($(if (Test-Path $envPath) { "PASS" } else { "WARN" })) ".env at $Root" $(if (Test-Path $envPath) { "present (install-service.ps1 reads LISTEN_PORT and MIDDLEWARE_API_KEYS from it)" } else { "copy .env.example to .env and set production values" })
 
 # 11. Disk space on the root drive
 $drive = (Split-Path -Qualifier $Root)
