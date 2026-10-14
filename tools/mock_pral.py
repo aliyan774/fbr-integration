@@ -39,7 +39,18 @@ def _now() -> str:
 
 
 def _unauthorized() -> JSONResponse:
-    return JSONResponse(status_code=401, content={"message": "Unauthorized: invalid or missing bearer token"})
+    # Shape observed from the real PRAL gateway (WSO2 fault) on an invalid token.
+    return JSONResponse(
+        status_code=401,
+        content={
+            "fault": {
+                "code": 900901,
+                "message": "Invalid Credentials",
+                "description": "Access failure for API: /di_data/v1, version: v1 status: (900901) - "
+                "Invalid Credentials. Make sure you have given the correct access token",
+            }
+        },
+    )
 
 
 async def _handle(request: Request, authorization: str | None, issue_number: bool) -> JSONResponse:

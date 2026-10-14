@@ -314,7 +314,7 @@ Every processed submission, and every GET, returns the same envelope. The HTTP c
 | 401 | no envelope | `X-API-Key` or `Authorization` missing or malformed, nothing stored | fix the headers; check `ZFBR_TOKEN` has a value |
 | 404 | no envelope | wrong environment segment, or GET for an unknown `erpInvoiceNo` | |
 | 502 | `FAILED_UPSTREAM` | PRAL 5xx after 3 attempts, or unreachable | resubmit later (automatic retry after 10 minutes is safe) |
-| 502 | `AUTH_ERROR` | PRAL returned 401 or error 0401 / 0402: token invalid, expired or not bound to this NTN | alert the token owner; update `ZFBR_TOKEN`; resubmit |
+| 502 | `AUTH_ERROR` | PRAL returned 401 (gateway fault 900901 `Invalid Credentials` in `pralResponse.fault`, see 6.7) or error 0401 / 0402: token invalid, expired or not bound to this NTN | alert the token owner; update `ZFBR_TOKEN`; resubmit |
 | 504 | `UNKNOWN` | post was sent, no answer arrived; PRAL may have issued a number | do **not** resubmit; call GET later; if still `UNKNOWN`, reconcile on the FBR portal |
 
 ### 6.3 Success, HTTP 201
@@ -397,6 +397,32 @@ Other envelope fields are present as in 6.3. A header-level rejection has `valid
 ```json
 { "detail": "Missing Authorization: Bearer header" }
 ```
+
+### 6.7 Token rejected by PRAL, HTTP 502
+
+Observed from the deployed middleware against the real PRAL sandbox gateway. PRAL answers HTTP 401
+with a gateway fault, not a `validationResponse`; the middleware maps it to `AUTH_ERROR` and
+returns the fault verbatim:
+
+```json
+{
+  "status": "AUTH_ERROR",
+  "fbrInvoiceNo": null,
+  "pralHttpStatus": 401,
+  "pralResponse": {
+    "fault": {
+      "code": 900901,
+      "message": "Invalid Credentials",
+      "description": "Access failure for API: /di_data/v1, version: v1 status: (900901) - Invalid Credentials. Make sure you have given the correct access token"
+    }
+  },
+  "errorDescriptions": [],
+  "attempts": 1
+}
+```
+
+SAP action: do not retry; the token in `ZFBR_TOKEN` for this seller and environment is wrong,
+expired, or issued for the other environment. Fix it, then resubmit.
 
 ## 7. Validations and data formats
 

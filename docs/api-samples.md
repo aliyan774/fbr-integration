@@ -178,6 +178,12 @@ The same body sent again returns HTTP 200 with `replayed: true` and the same `tr
                 "type": "L008" } ] }
 ```
 
+## Response: AUTH_ERROR (HTTP 502)
+
+`docs/samples/response-auth-error.json`, captured from the real PRAL sandbox gateway: PRAL answers
+HTTP 401 with `{"fault": {"code": 900901, "message": "Invalid Credentials", ...}}` rather than a
+`validationResponse`. The middleware returns it verbatim in `pralResponse` with `status: "AUTH_ERROR"`.
+
 ## Status to HTTP
 
 | `status` | HTTP | SAP action |

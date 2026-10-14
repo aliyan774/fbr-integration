@@ -1,0 +1,25 @@
+{
+  "trackingId": "728f8e14-4404-423a-9de4-ff4cb647229b",
+  "environment": "dev",
+  "erpInvoiceNo": "0090000001",
+  "sellerNtn": "0786909",
+  "callbackRef": "1000/2025",
+  "status": "AUTH_ERROR",
+  "replayed": false,
+  "fbrInvoiceNo": null,
+  "dated": null,
+  "pralHttpStatus": 401,
+  "pralResponse": {
+    "fault": {
+      "code": 900901,
+      "message": "Invalid Credentials",
+      "description": "Access failure for API: /di_data/v1, version: v1 status: (900901) - Invalid Credentials. Make sure you have given the correct access token"
+    }
+  },
+  "localErrors": [],
+  "errorDescriptions": [],
+  "attempts": 1,
+  "receivedAt": "2026-10-14T18:04:27.628948Z",
+  "completedAt": "2026-10-14T18:04:27.967797Z",
+  "elapsedMs": 338
+}
