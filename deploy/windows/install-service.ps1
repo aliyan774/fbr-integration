@@ -189,8 +189,13 @@ if ($SkipFirewall -or $listenHost -eq "127.0.0.1") {
 
 # --- 7. Start + health check -------------------------------------------------
 Step 7 "Starting service"
-& $nssm start $ServiceName | Out-Null
+# nssm start returns while Windows still reports SERVICE_START_PENDING; that message is normal.
+& $nssm start $ServiceName 2>&1 | Where-Object { $_ -notmatch "SERVICE_START_PENDING" } | Out-Null
 Start-Sleep -Seconds 5
+$hostIp = (Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+    Where-Object { $_.IPAddress -notlike "127.*" -and $_.IPAddress -notlike "169.254.*" -and $_.PrefixOrigin -ne "WellKnown" } |
+    Sort-Object InterfaceMetric | Select-Object -First 1).IPAddress
+if (-not $hostIp) { $hostIp = "<host>" }
 
 try {
     $resp = Invoke-RestMethod -Uri "http://localhost:$port/health" -TimeoutSec 15
@@ -199,8 +204,9 @@ try {
         Write-Host ""
         Write-Host "SUCCESS - service '$ServiceName' is running." -ForegroundColor Green
         Write-Host "  Health:        http://localhost:$port/health   (db=$($resp.db), environments: $envs)"
-        Write-Host "  Submit (dev):  POST http://<host>:$port/api/v1/dev/invoices"
-        Write-Host "  Submit (prd):  POST http://<host>:$port/api/v1/prd/invoices"
+        Write-Host "  From SAP:      http://${hostIp}:$port/health   (run this on the SAP app server to prove the firewall rule)"
+        Write-Host "  Submit (dev):  POST http://${hostIp}:$port/api/v1/dev/invoices"
+        Write-Host "  Submit (prd):  POST http://${hostIp}:$port/api/v1/prd/invoices"
         Write-Host "  OpenAPI:       http://localhost:$port/docs"
         Write-Host "  Logs:          $AppDir\logs\  (app.log, service.out.log, service.err.log)"
         Write-Host "  Manage:        nssm start|stop|restart|status $ServiceName"
