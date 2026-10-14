@@ -26,6 +26,30 @@ All commands are PowerShell, run as Administrator unless noted.
 Run `app\deploy\preflight.ps1` (read-only, prints PASS / WARN / FAIL per check), or the
 individual commands below. Every FAIL blocks the install.
 
+**Step 1: inventory the ports in use and choose a free one.** The server already hosts another
+application, so the middleware port must be picked from what is free, not assumed. Run this
+first; the port you choose goes into `LISTEN_PORT` in step 4, the firewall rule in step 7 and the
+IIS proxy target in step 8.
+
+```powershell
+# every TCP port something is listening on, with the owning process
+Get-NetTCPConnection -State Listen |
+  Sort-Object LocalPort -Unique |
+  Select-Object LocalPort, LocalAddress, OwningProcess,
+    @{n="Process";e={(Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue).ProcessName}} |
+  Format-Table -AutoSize
+
+# ports bound by IIS sites, if IIS is installed
+Import-Module WebAdministration -ErrorAction SilentlyContinue; Get-WebBinding | Select-Object protocol, bindingInformation
+
+# candidate port free? (repeat with your choice; no output = free)
+Get-NetTCPConnection -LocalPort 8080 -State Listen -ErrorAction SilentlyContinue
+```
+
+Pick a port that is not listed and not in the other application's documented range. Suggested
+candidates: 8080 (behind IIS), 8443 (direct TLS), then 8081, 8444. Write the choice down; the
+rest of this guide uses 8080 as the example and every place it appears must carry your value.
+
 ```powershell
 # Python: must print 3.12.x, 64-bit, from python.org (not WindowsApps)
 python --version; py -0p
@@ -44,8 +68,8 @@ Resolve-DnsName gw.fbr.gov.pk
 Get-ChildItem env: | Where-Object Name -match "PROXY"
 (Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings").ProxyServer
 
-# Listen port free (8080 behind IIS, 8443 for direct TLS)
-Get-NetTCPConnection -LocalPort 8080 -State Listen -ErrorAction SilentlyContinue
+# Listen port free: already covered by step 1 above; re-run it right before the install
+Get-NetTCPConnection -LocalPort <chosen port> -State Listen -ErrorAction SilentlyContinue
 
 # Disk, clock, time zone
 Get-PSDrive C | Select-Object @{n="FreeGB";e={[math]::Round($_.Free/1GB,1)}}
@@ -59,7 +83,7 @@ Get-TimeZone
 | PyPI reachable | `pip install` downloads about 40 packages; without internet, build a wheelhouse on another machine (`pip download -r ...`) and install with `--no-index --find-links` |
 | PRAL gateway reachable | Every submission ends `FAILED_UPSTREAM` otherwise. Test from the server itself, not from a workstation |
 | Proxy | httpx honours `HTTPS_PROXY`; it must be set in the service environment, not only in the admin's profile |
-| Port free | uvicorn fails to bind and NSSM restarts the service in a loop |
+| Port inventory and a free port | another application is already on this server; a clash means uvicorn fails to bind and NSSM restarts the service in a loop, or the other application stops answering after a reboot race |
 | Disk space | SQLite file plus 30 days of logs plus the venv: 5 GB is comfortable |
 | Clock and time zone | `invoiceDate` must not be in the future and PRAL's `dated` is compared by operators; the server should sync to a domain or NTP source |
 | Admin shell | service install, `icacls`, firewall rule |
@@ -152,7 +176,7 @@ DATABASE_URL=sqlite+aiosqlite:///C:/fbr-middleware/data/fbr_middleware.db
 LOG_DIR=C:\fbr-middleware\logs
 LOG_LEVEL=INFO
 LISTEN_HOST=127.0.0.1               # behind IIS; 0.0.0.0 if SAP calls the port directly
-LISTEN_PORT=8080
+LISTEN_PORT=8080                    # the free port chosen in section 1b, step 1
 ```
 
 Generate a key: `[Convert]::ToBase64String((1..48 | % { Get-Random -Max 256 }) -as [byte[]])`.
@@ -233,7 +257,9 @@ New-NetFirewallRule -DisplayName "FBR Middleware" -Direction Inbound -Protocol T
   -RemoteAddress 10.0.0.11,10.0.0.12 -Action Allow
 ```
 
-Use port 443 when IIS fronts the service, otherwise the `LISTEN_PORT` value.
+Use port 443 when IIS fronts the service, otherwise the `LISTEN_PORT` value chosen in section
+1b. If the other application already owns 443 in IIS, give the middleware site its own host name
+(SNI binding) or a second HTTPS port such as 8443, and open that one instead.
 
 ## 8. TLS
 
@@ -324,6 +350,7 @@ with pip, restore `data\` from the backup if the schema changed, start the servi
 | Service stops immediately | Check `service-err.log`. Usually a bad `.env` value (e.g. `FBR_ENABLED_ENVS` typo) or the `.env` ACL denies the service account. |
 | `/health` shows `db: error` | Service account lacks write access to `data\`, or the path in `DATABASE_URL` does not exist. |
 | 404 on `/api/v1/prd/invoices` | `FBR_ENABLED_ENVS` does not include `prd`. |
+| Service starts then stops within seconds, `service-err.log` says "address already in use" / `WinError 10048` | `LISTEN_PORT` collides with the other application. Re-run the port inventory in section 1b and pick another port. |
 | Every call ends FAILED_UPSTREAM | No outbound route to `gw.fbr.gov.pk`: proxy variables, firewall, or DNS. Test with `Invoke-WebRequest https://gw.fbr.gov.pk/ -UseBasicParsing`. |
 | AUTH_ERROR for one NTN only | Token for that NTN is wrong, expired, or issued for the other environment (sandbox token on `prd` or vice versa). |
 | ABAP reports timeouts but the middleware logs SUBMITTED | ABAP/IIS timeout too short. Raise to at least 120 s (ARR: 180 s) and have ABAP call GET before resubmitting. |

@@ -85,7 +85,22 @@ try {
     Report "PASS" "DNS for PRAL gateway" "$FbrHost -> $($dns.IPAddress)"
 } catch { Report "FAIL" "DNS for PRAL gateway" $_.Exception.Message }
 
-# 8. Listen port free
+# 8. Port inventory: everything already listening on this server (another application is deployed here)
+$allListening = @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Sort-Object LocalPort -Unique)
+$portList = ($allListening | ForEach-Object {
+    $pn = (Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue).ProcessName
+    "$($_.LocalPort)=$pn"
+}) -join ", "
+Report "PASS" "Ports already in use" $(if ($portList) { $portList } else { "none" })
+foreach ($cand in @($Port, 8080, 8443, 8081, 8444) | Select-Object -Unique) {
+    if (-not ($allListening | Where-Object { $_.LocalPort -eq $cand })) {
+        if ($cand -eq $Port) { Report "PASS" "First free candidate port" "$cand: your chosen port is free, use it as LISTEN_PORT" }
+        else { Report "WARN" "First free candidate port" "$cand: chosen port $Port is in use, set LISTEN_PORT=$cand (and the firewall / IIS target) instead" }
+        break
+    }
+}
+
+# 8b. Chosen listen port free
 $listening = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
 if ($listening) {
     $owner = (Get-Process -Id $listening[0].OwningProcess -ErrorAction SilentlyContinue).ProcessName
