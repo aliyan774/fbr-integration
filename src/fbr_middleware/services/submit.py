@@ -97,6 +97,60 @@ class SubmissionService:
             )
         return envelope_from_row(row, replayed=False) if row else None
 
+    async def validate_only(self, env: FbrEnvironment, submission: InvoiceSubmission, token: str) -> SubmitResult:
+        """Dry run: local rules + PRAL validateinvoicedata. Never posts, never stores anything.
+
+        Returns VALIDATED (200), REJECTED_LOCAL / REJECTED_FBR (422), AUTH_ERROR / FAILED_UPSTREAM (502).
+        """
+        received_at = _utcnow()
+        t0 = time.perf_counter()
+        tracking_id = str(uuid.uuid4())
+        local_errors = prevalidate(submission.invoice)
+        attempts: list[AttemptRecord] = []
+        result: PralResult | None = None
+        if local_errors:
+            status = SubmissionStatus.REJECTED_LOCAL
+        else:
+            payload_json = dumps_pral(prepare_payload(submission.invoice, env))
+            async with self.gate.acquire(f"{env.name}:{submission.sellerNtn}"):
+                try:
+                    result = await self.pral.validate_invoice(env, payload_json, token, attempts)
+                    parsed = PralResponse.try_parse(result.body)
+                    status = (
+                        SubmissionStatus.VALIDATED
+                        if parsed is not None and parsed.is_success()
+                        else SubmissionStatus.REJECTED_FBR
+                    )
+                except AuthError as exc:
+                    status, result = SubmissionStatus.AUTH_ERROR, exc.result
+                except UpstreamError as exc:
+                    status, result = SubmissionStatus.FAILED_UPSTREAM, exc.result
+        log.info("env=%s erpInvoiceNo=%s trackingId=%s dry-run %s after %d PRAL call(s)",
+                 env.name, submission.erpInvoiceNo, tracking_id, status.value, len(attempts))
+        completed_at = _utcnow()
+        body: Any | None = result.body if result is not None else None
+        parsed_body = PralResponse.try_parse(body)
+        envelope = InvoiceEnvelope(
+            trackingId=tracking_id,
+            environment=env.name,
+            erpInvoiceNo=submission.erpInvoiceNo,
+            sellerNtn=submission.sellerNtn,
+            callbackRef=submission.callbackRef,
+            status=status,
+            replayed=False,
+            fbrInvoiceNo=None,
+            dated=parsed_body.dated if parsed_body else None,
+            pralHttpStatus=result.http_status if result is not None else None,
+            pralResponse=body if isinstance(body, (dict, list)) else None,
+            localErrors=local_errors,
+            errorDescriptions=descriptions_for(body),
+            attempts=len(attempts),
+            receivedAt=received_at,
+            completedAt=completed_at,
+            elapsedMs=int((time.perf_counter() - t0) * 1000),
+        )
+        return SubmitResult(envelope, envelope.http_status)
+
     async def submit(self, env: FbrEnvironment, submission: InvoiceSubmission, token: str) -> SubmitResult:
         """Process one submission against ``env``. ``token`` lives only on this call stack and is never stored."""
         received_at = _utcnow()

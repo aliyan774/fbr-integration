@@ -9,6 +9,7 @@ collection `postman/FBR-Middleware.postman_collection.json`.
 |---|---|---|---|
 | POST | `/api/v1/dev/invoices` | `X-API-Key`, `Authorization: Bearer <sandbox token>` | Submit to PRAL sandbox (validate, then post) |
 | POST | `/api/v1/prd/invoices` | `X-API-Key`, `Authorization: Bearer <production token>` | Submit to PRAL production |
+| POST | `/api/v1/{dev\|prd}/invoices/validate` | same as submit | Dry run: local rules + PRAL `validateinvoicedata`, nothing posted or stored; `status` VALIDATED (200) or a rejection |
 | GET | `/api/v1/{dev\|prd}/invoices/{erpInvoiceNo}` | `X-API-Key` | Stored result |
 | GET | `/health` | none | Liveness, DB, in-flight, PRAL URLs per environment |
 
@@ -182,6 +183,7 @@ The same body sent again returns HTTP 200 with `replayed: true` and the same `tr
 | `status` | HTTP | SAP action |
 |---|---|---|
 | `SUBMITTED` | 201 | store `fbrInvoiceNo` and per-item `invoiceNo`, release output |
+| `VALIDATED` | 200 | dry run passed; submit when ready |
 | replayed | 200 | same as the stored status; PRAL was not called again |
 | `REJECTED_LOCAL` | 422 | fix per `localErrors`, resubmit |
 | `REJECTED_FBR` | 422 | fix per `pralResponse` + `errorDescriptions`, resubmit |

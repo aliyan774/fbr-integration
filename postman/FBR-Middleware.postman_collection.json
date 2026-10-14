@@ -83,6 +83,79 @@
       "description": "Routes to validateinvoicedata_sb / postinvoicedata_sb. scenarioId is required. Uses {{devToken}}.",
       "item": [
         {
+          "name": "0. Validate only (dry run)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "Middleware API key (MIDDLEWARE_API_KEYS)"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{devToken}}",
+                "description": "PRAL Bearer token for this environment, from ZFBR_TOKEN"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/dev/invoices/validate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "dev",
+                "invoices",
+                "validate"
+              ]
+            },
+            "description": "Local rules + PRAL validateinvoicedata only. Nothing is posted, no FBR number, nothing stored; a later submit with the same erpInvoiceNo is not a replay.",
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"erpInvoiceNo\": \"{{erpInvoiceNo}}\",\n  \"sellerNtn\": \"0786909\",\n  \"callbackRef\": \"1000/2025\",\n  \"invoice\": {\n    \"invoiceType\": \"Sale Invoice\",\n    \"invoiceDate\": \"2025-04-21\",\n    \"sellerNTNCNIC\": \"0786909\",\n    \"sellerBusinessName\": \"Company 8\",\n    \"sellerProvince\": \"Sindh\",\n    \"sellerAddress\": \"Karachi\",\n    \"buyerNTNCNIC\": \"1000000000000\",\n    \"buyerBusinessName\": \"FERTILIZER MANUFAC IRS NEW\",\n    \"buyerProvince\": \"Sindh\",\n    \"buyerAddress\": \"Karachi\",\n    \"buyerRegistrationType\": \"Registered\",\n    \"invoiceRefNo\": \"\",\n    \"scenarioId\": \"SN001\",\n    \"items\": [\n      {\n        \"hsCode\": \"0101.2100\",\n        \"productDescription\": \"product Description\",\n        \"rate\": \"18%\",\n        \"uoM\": \"Numbers, pieces, units\",\n        \"quantity\": 1.0,\n        \"totalValues\": 0.0,\n        \"valueSalesExcludingST\": 1000.0,\n        \"fixedNotifiedValueOrRetailPrice\": 0.0,\n        \"salesTaxApplicable\": 180.0,\n        \"salesTaxWithheldAtSource\": 0.0,\n        \"extraTax\": 0.0,\n        \"furtherTax\": 120.0,\n        \"sroScheduleNo\": \"\",\n        \"fedPayable\": 0.0,\n        \"discount\": 0.0,\n        \"saleType\": \"Goods at standard rate (default)\",\n        \"sroItemSerialNo\": \"\"\n      }\n    ]\n  }\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('status VALIDATED', () => pm.expect(pm.response.json().status).to.eql('VALIDATED'));",
+                  "pm.test('no FBR number issued', () => pm.expect(pm.response.json().fbrInvoiceNo).to.eql(null));",
+                  "pm.test('one PRAL call', () => pm.expect(pm.response.json().attempts).to.eql(1));",
+                  "const b = pm.response.json();",
+                  "pm.test('X-Tracking-Id header equals trackingId', () => pm.expect(pm.response.headers.get('X-Tracking-Id')).to.eql(b.trackingId));",
+                  "pm.test('envelope has every documented field', () => {",
+                  "  ['trackingId','environment','erpInvoiceNo','sellerNtn','callbackRef','status','replayed','fbrInvoiceNo','dated',",
+                  "   'pralHttpStatus','pralResponse','localErrors','errorDescriptions','attempts','receivedAt','completedAt','elapsedMs']",
+                  "   .forEach(k => pm.expect(b, k).to.have.property(k));",
+                  "});",
+                  "pm.collectionVariables.set('lastTrackingId', b.trackingId);",
+                  "if (b.fbrInvoiceNo) pm.collectionVariables.set('lastFbrInvoiceNo', b.fbrInvoiceNo);"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
           "name": "1. Submit sale invoice",
           "request": {
             "method": "POST",

@@ -18,6 +18,7 @@ class SubmissionStatus(str, Enum):
     FAILED_UPSTREAM = "FAILED_UPSTREAM"
     AUTH_ERROR = "AUTH_ERROR"
     UNKNOWN = "UNKNOWN"
+    VALIDATED = "VALIDATED"  # dry run only: PRAL validate passed, nothing posted, nothing stored
 
 
 #: HTTP status returned to SAP for a fresh (non-replayed) result.
@@ -28,6 +29,7 @@ HTTP_STATUS_BY_RESULT: dict[SubmissionStatus, int] = {
     SubmissionStatus.FAILED_UPSTREAM: 502,
     SubmissionStatus.AUTH_ERROR: 502,
     SubmissionStatus.UNKNOWN: 504,
+    SubmissionStatus.VALIDATED: 200,
 }
 
 #: Statuses that are replayed (HTTP 200, replayed=true) instead of calling PRAL again.

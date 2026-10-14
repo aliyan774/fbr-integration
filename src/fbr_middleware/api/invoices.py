@@ -79,6 +79,36 @@ async def submit_invoice(
     return _envelope_response(result.envelope, result.http_status)
 
 
+@router.post(
+    "/validate",
+    response_model=InvoiceEnvelope,
+    status_code=status.HTTP_200_OK,
+    summary="Dry run: local rules + PRAL validateinvoicedata only. Nothing is posted or stored.",
+    responses={
+        200: {"description": "VALIDATED: PRAL accepted the payload; no FBR number was issued"},
+        401: {"description": "Missing/invalid X-API-Key or missing/malformed Authorization: Bearer"},
+        404: {"description": "Unknown environment segment (use dev or prd)"},
+        422: {"description": "Shape violation, REJECTED_LOCAL or REJECTED_FBR"},
+        502: {"description": "FAILED_UPSTREAM or AUTH_ERROR"},
+    },
+)
+async def validate_invoice(
+    request: Request,
+    submission: InvoiceSubmission,
+    _api_key: str = Depends(require_api_key),
+    token: str = Depends(require_bearer),
+    env: FbrEnvironment = Depends(resolve_env),
+) -> JSONResponse:
+    env_errors = environment_errors(submission.invoice, env)
+    if env_errors:
+        return JSONResponse(
+            status_code=422,
+            content={"detail": [{"field": e.field, "message": e.message, "type": e.code} for e in env_errors]},
+        )
+    result = await _service(request).validate_only(env, submission, token)
+    return _envelope_response(result.envelope, result.http_status)
+
+
 @router.get(
     "/{erp_invoice_no}",
     response_model=InvoiceEnvelope,

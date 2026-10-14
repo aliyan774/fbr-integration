@@ -11,6 +11,7 @@ One instance serves both PRAL environments. The URL picks the target:
 |---|---|---|---|
 | `POST /api/v1/dev/invoices` | sandbox | `.../validateinvoicedata_sb`, `.../postinvoicedata_sb` | required, forwarded |
 | `POST /api/v1/prd/invoices` | production | `.../validateinvoicedata`, `.../postinvoicedata` | stripped |
+| `POST /api/v1/{dev\|prd}/invoices/validate` | dry run on either | `.../validateinvoicedata` only; nothing posted or stored | as above |
 
 SAP sends the Bearer token issued for that environment (`ZFBR_TOKEN` keyed by `ENV`). Any other
 segment answers 404. `erpInvoiceNo` is idempotent per environment, so the same SAP document can
@@ -48,7 +49,7 @@ src/fbr_middleware/
   services/errors.py      PRAL error code -> BRIEF_MSG_DESC catalogue (spec section 7)
   services/concurrency.py per-seller-NTN lock + global in-flight cap
   services/submit.py      orchestration: idempotency -> prevalidate -> validate -> post -> persist
-  api/invoices.py         POST /api/v1/{env}/invoices, GET /api/v1/{env}/invoices/{erpInvoiceNo}
+  api/invoices.py         POST /api/v1/{env}/invoices[/validate], GET /api/v1/{env}/invoices/{erpInvoiceNo}
   api/health.py           GET /health
   main.py, run.py         app factory and `python -m fbr_middleware`
 tools/mock_pral.py        mock PRAL gateway for local / SAP-team testing
@@ -193,6 +194,7 @@ catch { $_.ErrorDetails.Message }
 | `status` | HTTP | Meaning |
 |---|---|---|
 | `SUBMITTED` | 201 | `fbrInvoiceNo` set, `pralResponse` is PRAL's post body verbatim |
+| `VALIDATED` | 200 | dry run via `.../invoices/validate` passed PRAL validate; nothing posted or stored |
 | (replay) | 200 | `replayed: true`, same erpInvoiceNo already SUBMITTED or UNKNOWN; PRAL not called |
 | `REJECTED_LOCAL` | 422 | see `localErrors[]` |
 | `REJECTED_FBR` | 422 | see `pralResponse.validationResponse` and `errorDescriptions[]` |
