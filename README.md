@@ -26,6 +26,7 @@ Documents:
 | [docs/api-samples.md](docs/api-samples.md) | Request parameters, sample payloads and responses |
 | [docs/samples/](docs/samples/) | The same samples as JSON files |
 | [postman/FBR-Middleware.postman_collection.json](postman/FBR-Middleware.postman_collection.json) | Postman collection for the middleware: health, dev, prd, every error case |
+| [postman/FBR-Middleware-PRL.postman_environment.json](postman/FBR-Middleware-PRL.postman_environment.json) | Postman environment for the deployed server (10.0.0.86:8080); fill in `apiKey` and the PRAL tokens |
 | [postman/FBR-Digital-Invoicing.postman_collection.json](postman/FBR-Digital-Invoicing.postman_collection.json) | PRAL's own endpoints (spec samples), for direct sandbox tests |
 | [docs/middleware-flow.md](docs/middleware-flow.md) | Design: flow, contract, token handling |
 | [docs/FBR-DI-API-Analysis.md](docs/FBR-DI-API-Analysis.md) | Analysis of the PRAL spec v1.12 |

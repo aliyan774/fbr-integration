@@ -349,7 +349,10 @@ missing-module error, the port conflict. The Windows Event Log only records that
 
 ## 8. TLS
 
-SAP's SM59 destination should use HTTPS. Two options:
+**Decision 2026-10-14: not enabled.** The middleware serves plain HTTP on the internal network
+(`http://10.0.0.86:8080`), SM59 uses HTTP, and no certificate is installed. Revisit before
+production traffic, since the PRAL token and the API key travel in request headers. When that
+time comes, SAP's SM59 destination should use HTTPS. Two options:
 
 - **IIS as reverse proxy.** Install IIS with URL Rewrite and Application Request Routing, bind the
   company certificate on 443 (own host name if OgraApi or another site already uses 443), reverse
