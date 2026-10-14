@@ -35,9 +35,23 @@ on `LISTEN_HOST:LISTEN_PORT` from `.env`. It handles both PRAL environments thro
 
 ---
 
-## 2. Pre-flight
+## 2. Get the code, then pre-flight
 
-Run the checks before anything is installed:
+The checks live in the repository, so the code comes first. Nothing is installed by this step.
+
+```powershell
+git clone https://github.com/aliyan774/fbr-integration.git C:\fbr-middleware
+```
+
+Without git on the server, or without credentials for the repository there: download the zip from
+GitHub (Code, Download ZIP) on a workstation, copy it over AnyDesk, then
+
+```powershell
+Expand-Archive -Path C:\Users\<you>\Downloads\fbr-integration-main.zip -DestinationPath C:\ -Force
+Rename-Item C:\fbr-integration-main C:\fbr-middleware
+```
+
+Now run the checks:
 
 ```powershell
 cd C:\fbr-middleware; powershell -ExecutionPolicy Bypass -File deploy\windows\preflight.ps1 -Root C:\fbr-middleware -Port 8080
@@ -86,11 +100,10 @@ C:\fbr-middleware\        git checkout of this repository (src\, deploy\, docs\,
 ```
 
 ```powershell
-New-Item -ItemType Directory -Force -Path C:\fbr-middleware, C:\fbr-middleware\logs, C:\fbr-middleware\data | Out-Null
-git clone <repo-url> C:\fbr-middleware        # or copy a release folder over AnyDesk
+New-Item -ItemType Directory -Force -Path C:\fbr-middleware\logs, C:\fbr-middleware\data | Out-Null
 ```
 
-Create the venv **inside** the directory from the 3.12 interpreter. On this machine `python` on
+The checkout itself was made in section 2. Create the venv **inside** the directory from the 3.12 interpreter. On this machine `python` on
 PATH belongs to the OGRA deployment, so name the interpreter explicitly:
 
 ```powershell
