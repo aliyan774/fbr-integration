@@ -21,6 +21,7 @@ param(
     [int]$Port = 8080,
     [string]$FbrHost = "gw.fbr.gov.pk",
     [string]$NssmDir = "C:\nssm",
+    [string]$Python = "",      # a specific python.exe to check (the one you will pass to install-service.ps1)
     [int]$MinFreeGB = 5
 )
 
@@ -38,16 +39,31 @@ Report ($(if ($isAdmin) { "PASS" } else { "WARN" })) "Administrator shell" $(if 
 # 2. PowerShell version
 Report ($(if ($PSVersionTable.PSVersion.Major -ge 5) { "PASS" } else { "FAIL" })) "PowerShell version" $PSVersionTable.PSVersion.ToString()
 
-# 3. Python 3.12 64-bit on PATH
-try {
-    $pyVer = (& python --version 2>&1 | Out-String).Trim()
-    $arch = (& python -c "import struct,sys;print(struct.calcsize('P')*8, sys.executable)" 2>&1 | Out-String).Trim()
-    $ok = $pyVer -match "^Python 3\.12\." -and $arch -like "64 *"
-    Report ($(if ($ok) { "PASS" } else { "FAIL" })) "Python 3.12 64-bit" "$pyVer ($arch)"
-    $store = $arch -like "*WindowsApps*"
-    if ($store) { Report "FAIL" "Python is the Store build" "install from python.org and remove the App Execution Alias" }
-} catch {
-    Report "FAIL" "Python 3.12 64-bit" "python not found on PATH"
+# 3. Python 3.12 64-bit: -Python if given, else "py -3.12", else python on PATH
+$pyExe = $null
+if ($Python) { if (Test-Path $Python) { $pyExe = $Python } else { Report "FAIL" "Python 3.12 64-bit" "-Python '$Python' does not exist" } }
+if (-not $pyExe -and -not $Python) {
+    try { $viaPy = (& py -3.12 -c "import sys; print(sys.executable)" 2>$null | Out-String).Trim(); if ($viaPy -and (Test-Path $viaPy)) { $pyExe = $viaPy } } catch { }
+    if (-not $pyExe) { $cmd = Get-Command python -ErrorAction SilentlyContinue; if ($cmd) { $pyExe = $cmd.Source } }
+}
+if ($pyExe) {
+    try {
+        $info = (& $pyExe -c "import struct,sys;print(sys.version.split()[0], struct.calcsize('P')*8, sys.executable)" 2>&1 | Out-String).Trim()
+        $ok = $info -match "^3\.12\.\d+ 64 "
+        Report ($(if ($ok) { "PASS" } else { "FAIL" })) "Python 3.12 64-bit" "$info$(if (-not $ok) { ' -> need 3.12 64-bit; pass -Python <path> to the right interpreter' })"
+        if ($info -like "*WindowsApps*") { Report "FAIL" "Python is the Store build" "install from python.org and remove the App Execution Alias" }
+        if ($info -match "\\Users\\") { Report "WARN" "Python under a user profile" "NETWORK SERVICE cannot read it; install 3.12 for all users (InstallAllUsers=1 PrependPath=0)" }
+    } catch { Report "FAIL" "Python 3.12 64-bit" "could not run $pyExe" }
+} elseif (-not $Python) {
+    Report "FAIL" "Python 3.12 64-bit" "no 'py -3.12' and no python on PATH -> install 3.12 for all users WITHOUT 'Add to PATH': python-3.12.x-amd64.exe /quiet InstallAllUsers=1 PrependPath=0 Include_launcher=1 Include_test=0, then re-run with -Python 'C:\Program Files\Python312\python.exe'"
+}
+# Python used by other NSSM services (so we never touch it, and may reuse its base install)
+$otherPy = @(Get-CimInstance Win32_Service | Where-Object { $_.PathName -match "python" -and $_.Name -ne "FbrMiddleware" })
+foreach ($svc in $otherPy) {
+    $exe = ($svc.PathName -replace '^"?([^"]*python[^"]*\.exe).*$', '$1')
+    $cfg = Join-Path (Split-Path (Split-Path $exe -Parent) -Parent) "pyvenv.cfg"
+    $base = if (Test-Path $cfg) { ((Get-Content $cfg | Where-Object { $_ -match '^(home|version)\s*=' }) -join "; ") } else { "not a venv" }
+    Report "PASS" "Python of service $($svc.Name)" "$exe ($base) -> leave it alone; reuse its base only if it is 3.12 and machine-wide"
 }
 try {
     $launcher = (& py -0p 2>&1 | Out-String).Trim()

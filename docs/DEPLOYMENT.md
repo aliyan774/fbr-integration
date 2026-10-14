@@ -71,7 +71,8 @@ It prints PASS / WARN / FAIL for each item and exits 1 on any FAIL. What it look
 | Check | Why it matters here |
 |---|---|
 | Every port already listening, with its process | OgraApi holds 8000; the middleware needs its own port. The script names the first free candidate from 8080, 8443, 8081, 8444 |
-| Python 3.12 64-bit, python.org build | pydantic-core has no wheel for 3.14; the Store build breaks venvs under a service account |
+| Python 3.12 64-bit, python.org build | pydantic-core has no wheel for 3.14; the Store build breaks venvs under a service account. Pass `-Python <python.exe>` to check a specific interpreter |
+| Python used by other NSSM services | prints OgraApi's interpreter and its venv base. Leave it alone; reuse its base only if it is 3.12 and machine-wide |
 | Other Python installations on PATH | OgraApi's install script relies on `python` on PATH. **Do not change PATH.** Install 3.12 without "Add to PATH" and point this install at it with `-Python` (section 3) |
 | PyPI reachable | `pip install` needs it; offline wheelhouse procedure in section 11 |
 | `gw.fbr.gov.pk` reachable and resolvable | otherwise every submission ends `FAILED_UPSTREAM`; test from the server, not a workstation |
@@ -90,6 +91,20 @@ Get-NetTCPConnection -State Listen | Sort-Object LocalPort -Unique |
 # the interpreter this service will use; must print 3.12.x and 64
 py -3.12 -c "import sys, struct; print(sys.version, struct.calcsize('P')*8)"
 ```
+
+If the pre-flight reports no Python 3.12 (as on the PRL machine: `python` is not on PATH and
+OgraApi's interpreter is not registered machine-wide), install it for all users **without**
+touching PATH. Download the 64-bit installer for the latest 3.12.x from python.org, then:
+
+```powershell
+.\python-3.12.10-amd64.exe /quiet InstallAllUsers=1 PrependPath=0 Include_launcher=1 Include_test=0
+& "C:\Program Files\Python312\python.exe" --version
+powershell -ExecutionPolicy Bypass -File deploy\windows\preflight.ps1 -Root C:\fbr-middleware -Port 8080 -Python "C:\Program Files\Python312\python.exe"
+```
+
+`PrependPath=0` leaves `python` on PATH exactly as OgraApi's installer found it. A per-user Python
+(under `C:\Users\...`) is not usable for this service: it runs as NETWORK SERVICE, which cannot
+read another user's profile, and a venv needs its base install at run time.
 
 Write the chosen port down. It goes into `.env` (section 3) and nowhere else; the install script
 reads it from there for the port check, the firewall rule and the health check.
