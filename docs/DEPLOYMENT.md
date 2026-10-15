@@ -333,7 +333,12 @@ Invoke-RestMethod -Method Post -Uri http://localhost:8003/api/v1/dev/invoices -H
 ```
 
 Expect `VALIDATED`, then `SUBMITTED` with an FBR number. The same POST again returns 200 with
-`replayed: true`. From the SAP DEV application server (10.0.0.38), prove the firewall rule:
+`replayed: true`. The whole Postman collection can be replayed on the server without Postman,
+which matters because a workstation outside the 10.0.0.0/24 network cannot reach the service:
+
+```powershell
+.env\Scripts\python.exe toolsun_collection.py postman\FBR-Middleware-PRL-inline.postman_collection.json --base-url http://localhost:8003 --api-key <key> --token <sandbox token or dummy-token>
+``` From the SAP DEV application server (10.0.0.38), prove the firewall rule:
 
 ```powershell
 Invoke-RestMethod http://10.0.0.86:8003/health

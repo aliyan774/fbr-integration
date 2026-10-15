@@ -28,6 +28,7 @@ Documents:
 | [postman/FBR-Middleware.postman_collection.json](postman/FBR-Middleware.postman_collection.json) | Postman collection for the middleware: health, dev, prd, every error case |
 | [postman/FBR-Middleware-PRL.postman_environment.json](postman/FBR-Middleware-PRL.postman_environment.json) | Postman environment for the deployed server (10.0.0.86:8003); fill in `apiKey` and the PRAL tokens |
 | [postman/FBR-Middleware-PRL-inline.postman_collection.json](postman/FBR-Middleware-PRL-inline.postman_collection.json) | Same requests with every value written in place for 10.0.0.86:8003, no variables; replace the `REPLACE_WITH_*` placeholders |
+| [tools/run_collection.py](tools/run_collection.py) | Replays either collection without Postman and checks every HTTP code: `python toolsun_collection.py postman\FBR-Middleware-PRL-inline.postman_collection.json --api-key <key> --token dummy-token` |
 | [postman/FBR-Digital-Invoicing.postman_collection.json](postman/FBR-Digital-Invoicing.postman_collection.json) | PRAL's own endpoints (spec samples), for direct sandbox tests |
 | [docs/middleware-flow.md](docs/middleware-flow.md) | Design: flow, contract, token handling |
 | [docs/FBR-DI-API-Analysis.md](docs/FBR-DI-API-Analysis.md) | Analysis of the PRAL spec v1.12 |
