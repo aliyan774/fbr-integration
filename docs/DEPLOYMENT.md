@@ -468,6 +468,16 @@ health check proves nothing. This includes API keys.
 backoff). ABAP's client timeout and any IIS ARR timeout must exceed that, or SAP sees a timeout while
 the middleware completes and stores a result; SAP must then call GET before resubmitting.
 
+**Postman (or anything not on the SAP server) times out, while `localhost` works.** Two causes,
+check both on the middleware server. (a) The firewall rule admits only the addresses in
+`RemoteAddress` (10.0.0.38); a workstation is dropped silently, which Postman shows as a timeout.
+Add it for the test: `Set-NetFirewallRule -DisplayName "FBR Middleware" -RemoteAddress 10.0.0.38,<workstation IP>`.
+(b) The rule applies to the Domain and Private profiles; if `Get-NetConnectionProfile` shows the
+adapter as Public the rule is inactive for everyone. Fix with
+`Set-NetConnectionProfile -InterfaceAlias "<alias>" -NetworkCategory Private` or
+`Set-NetFirewallRule -DisplayName "FBR Middleware" -Profile Any`. From the client,
+`Test-NetConnection 10.0.0.86 -Port 8003` answers the question in one line.
+
 **Check the reverse proxy points where you think.** Restarting the service while testing through
 IIS can mean restarting one instance and testing another.
 

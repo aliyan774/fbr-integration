@@ -209,9 +209,20 @@ if ($iis) {
     } catch { Report "WARN" "IIS bindings on 443" "IIS running but WebAdministration module unavailable; check bindings in IIS Manager" }
 } else { Report "PASS" "IIS" "not installed (direct uvicorn TLS or install IIS later)" }
 
+# 14b. Network profile: a firewall rule on Domain,Private is inactive while the adapter is Public
+$profiles = @(Get-NetConnectionProfile -ErrorAction SilentlyContinue)
+$pub = @($profiles | Where-Object { $_.NetworkCategory -eq "Public" })
+$profDetail = ($profiles | ForEach-Object { "$($_.InterfaceAlias)=$($_.NetworkCategory)" }) -join ", "
+if ($pub) { Report "WARN" "Network profile" "$profDetail -> rule on Domain,Private will not apply on a Public adapter: Set-NetConnectionProfile -InterfaceAlias '<alias>' -NetworkCategory Private, or Set-NetFirewallRule -DisplayName 'FBR Middleware' -Profile Any" }
+else { Report "PASS" "Network profile" $(if ($profDetail) { $profDetail } else { "none reported" }) }
+
 # 15. Coexistence: firewall rule name and other services using the same port range
 $fw = Get-NetFirewallRule -DisplayName "FBR Middleware" -ErrorAction SilentlyContinue
-Report "PASS" "Firewall rule 'FBR Middleware'" $(if ($fw) { "exists already; New-NetFirewallRule would add a duplicate, edit the existing one" } else { "none yet" })
+if ($fw) {
+    $fwPorts = ($fw | Get-NetFirewallPortFilter).LocalPort -join ","
+    $fwFrom = ($fw | Get-NetFirewallAddressFilter).RemoteAddress -join ","
+    Report "PASS" "Firewall rule 'FBR Middleware'" "port $fwPorts, profiles $($fw.Profile), from $fwFrom -> only those addresses can reach the middleware; add a workstation IP for Postman tests"
+} else { Report "PASS" "Firewall rule 'FBR Middleware'" "none yet" }
 $otherSvcs = @(Get-CimInstance Win32_Service | Where-Object { $_.PathName -match "nssm|python|uvicorn" -and $_.Name -ne "FbrMiddleware" } | ForEach-Object { "$($_.Name) ($($_.State))" })
 Report "PASS" "Other Python/NSSM services present" $(if ($otherSvcs) { ($otherSvcs -join "; ") + " -> keep ports and folders separate" } else { "none" })
 
