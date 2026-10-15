@@ -7,6 +7,10 @@ itself (over AnyDesk) or any machine on the server's network.
     .\\venv\\Scripts\\python.exe tools\\run_collection.py postman\\FBR-Middleware-PRL-inline.postman_collection.json ^
         --api-key <X-API-Key from .env> --token dummy-token
 
+    # before the PRAL token exists: AUTH_ERROR from PRAL counts as the expected answer
+    .\\venv\\Scripts\\python.exe tools\\run_collection.py postman\\FBR-Middleware-PRL-inline.postman_collection.json ^
+        --base-url http://localhost:8003 --api-key <key> --token dummy-token --no-token-yet
+
     # the variable-based collection works too; values are substituted on the fly
     .\\venv\\Scripts\\python.exe tools\\run_collection.py postman\\FBR-Middleware.postman_collection.json ^
         --base-url http://localhost:8003 --api-key <key> --token dummy-token
@@ -42,6 +46,8 @@ def main() -> int:
     ap.add_argument("--erp", default=None, help="erpInvoiceNo to use (default: the collection's)")
     ap.add_argument("--only", default=None, help="run only requests whose name contains this text")
     ap.add_argument("--timeout", type=float, default=210.0)
+    ap.add_argument("--no-token-yet", action="store_true",
+                    help="no PRAL token available: accept 502 AUTH_ERROR as the expected answer for every request that reaches PRAL")
     args = ap.parse_args()
 
     col = json.loads(args.collection.read_text(encoding="utf-8"))
@@ -103,20 +109,25 @@ def main() -> int:
                 continue
             exp = expected(item)
             ok = (resp.status_code in exp) if exp else True
-            failures += 0 if ok else 1
             status = ""
+            note = ""
             try:
                 j = resp.json()
                 if isinstance(j, dict):
                     status = j.get("status") or (j.get("detail") if isinstance(j.get("detail"), str) else "")
+                    if (not ok and args.no_token_yet and resp.status_code in (200, 502)
+                            and j.get("status") == "AUTH_ERROR" and j.get("pralHttpStatus") == 401):
+                        ok = True
+                        note = "  [reached PRAL; token rejected as expected without a real token]"
                     if j.get("fbrInvoiceNo"):
                         status += f"  fbrInvoiceNo={j['fbrInvoiceNo']}"
                     if j.get("trackingId"):
                         status += f"  trackingId={j['trackingId']}"
             except ValueError:
                 pass
+            failures += 0 if ok else 1
             tag = "OK " if ok else "BAD"
-            print(f"{tag}  {resp.status_code} (expected {sorted(exp) or 'any'})  {name}  {status}")
+            print(f"{tag}  {resp.status_code} (expected {sorted(exp) or 'any'})  {name}  {status}{note}")
     print(f"\n{'all requests answered as expected' if not failures else f'{failures} request(s) did not'}")
     return 1 if failures else 0
 
