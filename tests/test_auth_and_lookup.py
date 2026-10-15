@@ -70,6 +70,13 @@ async def test_get_returns_stored_envelope_and_404_for_unknown(client, pral, val
     assert (await client.get("/api/v1/dev/invoices/INV-GET")).status_code == 401  # GET needs the API key
 
 
+async def test_root_answers_200_for_sm59_connection_test(client):
+    r = await client.get("/")
+    assert r.status_code == 200
+    assert r.json()["service"] == "fbr-middleware"
+    assert r.json()["health"] == "/health"
+
+
 async def test_health_reports_db_and_inflight(client):
     r = await client.get("/health")
     assert r.status_code == 200

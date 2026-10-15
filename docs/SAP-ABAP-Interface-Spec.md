@@ -43,7 +43,8 @@ SAP calls the middleware, never PRAL. The host and port come from the SM59 desti
 | POST | `/api/v1/prd/invoices/validate` | same as the submit call | Dry run against production validation, same guarantees |
 | GET | `/api/v1/dev/invoices/{erpInvoiceNo}` | `X-API-Key` | Stored result of an earlier sandbox submission |
 | GET | `/api/v1/prd/invoices/{erpInvoiceNo}` | `X-API-Key` | Stored result of an earlier production submission; call it after a 504 or an ABAP-side timeout before resubmitting |
-| GET | `/health` | none | Liveness; useful from SM59 connection test |
+| GET | `/health` | none | Liveness: DB check, in-flight count, PRAL URLs |
+| GET | `/` | none | Answers 200 with the service name, so the SM59 "Connection Test" button (which calls `/`) shows success |
 
 Headers on the POST:
 

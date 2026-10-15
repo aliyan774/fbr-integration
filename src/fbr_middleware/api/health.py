@@ -11,6 +11,18 @@ from .. import __version__
 router = APIRouter(tags=["ops"])
 
 
+@router.get("/", summary="Root: answers 200 so an SM59 connection test (which calls '/') shows success", include_in_schema=False)
+async def root() -> JSONResponse:
+    return JSONResponse(
+        {
+            "service": "fbr-middleware",
+            "version": __version__,
+            "health": "/health",
+            "submit": ["/api/v1/dev/invoices", "/api/v1/prd/invoices"],
+        }
+    )
+
+
 @router.get("/health", summary="Liveness, DB check and in-flight count")
 async def health(request: Request) -> JSONResponse:
     state = request.app.state
