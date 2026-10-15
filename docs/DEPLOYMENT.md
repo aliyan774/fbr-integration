@@ -20,7 +20,7 @@ Addresses used throughout:
 
 | Machine | Address | Role |
 |---|---|---|
-| Middleware (this server) | `10.0.0.86`, port `8080` | runs `FbrMiddleware`; SAP calls `http://10.0.0.86:8080/api/v1/...` (HTTPS once section 8 is done) |
+| Middleware (this server) | `10.0.0.86`, port `8003` | runs `FbrMiddleware`; SAP calls `http://10.0.0.86:8003/api/v1/...` (HTTPS once section 8 is done) |
 | SAP DEV application server | `10.0.0.38` (SID `DEV`, instance `00`) | the only caller allowed through the firewall for now |
 | SAP QAS / PRD application servers | to be added | add to the firewall rule and the API key list before each system goes live |
 | OgraApi (same server) | `10.0.0.86`, port `8000` | existing service; untouched |
@@ -63,14 +63,14 @@ Rename-Item C:\fbr-integration-main C:\fbr-middleware
 Now run the checks:
 
 ```powershell
-cd C:\fbr-middleware; powershell -ExecutionPolicy Bypass -File deploy\windows\preflight.ps1 -Root C:\fbr-middleware -Port 8080
+cd C:\fbr-middleware; powershell -ExecutionPolicy Bypass -File deploy\windows\preflight.ps1 -Root C:\fbr-middleware -Port 8003
 ```
 
 It prints PASS / WARN / FAIL for each item and exits 1 on any FAIL. What it looks at, and why:
 
 | Check | Why it matters here |
 |---|---|
-| Every port already listening, with its process | OgraApi holds 8000; the middleware needs its own port. The script names the first free candidate from 8080, 8443, 8081, 8444 |
+| Every port already listening, with its process | OgraApi holds 8000; the middleware needs its own port. The script names the first free candidate from 8003, 8080, 8443, 8081 |
 | Python 3.12 64-bit, python.org build | pydantic-core has no wheel for 3.14; the Store build breaks venvs under a service account. Pass `-Python <python.exe>` to check a specific interpreter |
 | Python used by other NSSM services | prints OgraApi's interpreter and its venv base. Leave it alone; reuse its base only if it is 3.12 and machine-wide |
 | Other Python installations on PATH | OgraApi's install script relies on `python` on PATH. **Do not change PATH.** Install 3.12 without "Add to PATH" and point this install at it with `-Python` (section 3) |
@@ -99,7 +99,7 @@ touching PATH. Download the 64-bit installer for the latest 3.12.x from python.o
 ```powershell
 .\python-3.12.10-amd64.exe /quiet InstallAllUsers=1 PrependPath=0 Include_launcher=1 Include_test=0
 & "C:\Program Files\Python312\python.exe" --version
-powershell -ExecutionPolicy Bypass -File deploy\windows\preflight.ps1 -Root C:\fbr-middleware -Port 8080 -Python "C:\Program Files\Python312\python.exe"
+powershell -ExecutionPolicy Bypass -File deploy\windows\preflight.ps1 -Root C:\fbr-middleware -Port 8003 -Python "C:\Program Files\Python312\python.exe"
 ```
 
 `PrependPath=0` leaves `python` on PATH exactly as OgraApi's installer found it. A per-user Python
@@ -159,7 +159,7 @@ DATABASE_URL=sqlite+aiosqlite:///./data/fbr_middleware.db
 LOG_DIR=./logs
 LOG_LEVEL=INFO
 LISTEN_HOST=0.0.0.0                   # 127.0.0.1 when IIS on this box is the only caller
-LISTEN_PORT=8080                      # the free port from section 2; never 8000
+LISTEN_PORT=8003                      # the free port from section 2; never 8000
 ```
 
 Generate a key: `[Convert]::ToBase64String((1..48 | % { Get-Random -Max 256 }) -as [byte[]])`.
@@ -180,7 +180,7 @@ icacls C:\fbr-middleware\.env /inheritance:r /grant:r "Administrators:(R,W)" /gr
 cd C:\fbr-middleware; .\venv\Scripts\python.exe -m fbr_middleware
 ```
 
-In a second window `Invoke-RestMethod http://localhost:8080/health` must show `status: ok`,
+In a second window `Invoke-RestMethod http://localhost:8003/health` must show `status: ok`,
 `db: ok` and both `dev` and `prd` under `environments` with the PRAL URLs. Ctrl+C to stop. A
 service that fails to start is far harder to diagnose than a console run, so do this first.
 
@@ -191,13 +191,13 @@ service that fails to start is far harder to diagnose than a console run, so do 
 Check nothing holds the port from `.env`, and only then open the firewall:
 
 ```powershell
-Get-NetTCPConnection -LocalPort 8080 -State Listen -ErrorAction SilentlyContinue | Select-Object OwningProcess, State
+Get-NetTCPConnection -LocalPort 8003 -State Listen -ErrorAction SilentlyContinue | Select-Object OwningProcess, State
 ```
 
 Empty output means free. If something answers, find out what and pick another port in `.env`:
 
 ```powershell
-Get-Process -Id (Get-NetTCPConnection -LocalPort 8080 -State Listen).OwningProcess
+Get-Process -Id (Get-NetTCPConnection -LocalPort 8003 -State Listen).OwningProcess
 ```
 
 ### Bind address
@@ -209,7 +209,7 @@ and the service cannot be reached directly even by accident.
 ### Firewall
 
 ```powershell
-New-NetFirewallRule -DisplayName "FBR Middleware" -Direction Inbound -Protocol TCP -LocalPort 8080 -Action Allow -Profile Domain,Private
+New-NetFirewallRule -DisplayName "FBR Middleware" -Direction Inbound -Protocol TCP -LocalPort 8003 -Action Allow -Profile Domain,Private
 Set-NetFirewallRule -DisplayName "FBR Middleware" -RemoteAddress 10.0.0.38              # SAP DEV app server; add QAS/PRD later
 Get-NetFirewallRule -DisplayName "FBR Middleware" | Get-NetFirewallPortFilter
 ```
@@ -319,7 +319,7 @@ Start-Service FbrMiddleware; Start-Sleep 5; Get-Service FbrMiddleware
 Check the app itself:
 
 ```powershell
-Invoke-RestMethod http://localhost:8080/health | ConvertTo-Json -Depth 4
+Invoke-RestMethod http://localhost:8003/health | ConvertTo-Json -Depth 4
 Get-Content C:\fbr-middleware\logs\service.err.log -Tail 40
 ```
 
@@ -328,15 +328,15 @@ Then one real submission to `dev` with the sandbox token, body from `docs\sample
 ```powershell
 $headers = @{ "X-API-Key" = "<key>"; "Authorization" = "Bearer <sandbox token>"; "Content-Type" = "application/json" }
 $body = Get-Content C:\fbr-middleware\docs\samples\sale-invoice-dev.json -Raw
-Invoke-RestMethod -Method Post -Uri http://localhost:8080/api/v1/dev/invoices/validate -Headers $headers -Body $body | Select-Object status, errorDescriptions
-Invoke-RestMethod -Method Post -Uri http://localhost:8080/api/v1/dev/invoices -Headers $headers -Body $body | Select-Object status, fbrInvoiceNo, trackingId
+Invoke-RestMethod -Method Post -Uri http://localhost:8003/api/v1/dev/invoices/validate -Headers $headers -Body $body | Select-Object status, errorDescriptions
+Invoke-RestMethod -Method Post -Uri http://localhost:8003/api/v1/dev/invoices -Headers $headers -Body $body | Select-Object status, fbrInvoiceNo, trackingId
 ```
 
 Expect `VALIDATED`, then `SUBMITTED` with an FBR number. The same POST again returns 200 with
 `replayed: true`. From the SAP DEV application server (10.0.0.38), prove the firewall rule:
 
 ```powershell
-Invoke-RestMethod http://10.0.0.86:8080/health
+Invoke-RestMethod http://10.0.0.86:8003/health
 ```
 
 If that times out while the local call works, the firewall rule or its `RemoteAddress` is wrong. Import `postman\FBR-Middleware.postman_collection.json` for the
@@ -350,7 +350,7 @@ missing-module error, the port conflict. The Windows Event Log only records that
 ## 8. TLS
 
 **Decision 2026-10-14: not enabled.** The middleware serves plain HTTP on the internal network
-(`http://10.0.0.86:8080`), SM59 uses HTTP, and no certificate is installed. Revisit before
+(`http://10.0.0.86:8003`), SM59 uses HTTP, and no certificate is installed. Revisit before
 production traffic, since the PRAL token and the API key travel in request headers. When that
 time comes, SAP's SM59 destination should use HTTPS. Two options:
 
@@ -358,7 +358,7 @@ time comes, SAP's SM59 destination should use HTTPS. Two options:
   company certificate on 443 (own host name if OgraApi or another site already uses 443), reverse
   proxy to `http://localhost:8080/`, ARR proxy timeout **200 s** (a submission can take two PRAL
   calls with retries), response buffering off. Set `LISTEN_HOST=127.0.0.1` and skip the firewall
-  rule for 8080; open 443 instead.
+  rule for 8003; open 443 instead.
 - **uvicorn with the certificate.** Export the certificate and key as PEM and set in `.env`:
   `LISTEN_PORT=8443`, `SSL_CERTFILE=C:\fbr-middleware\cert.pem`, `SSL_KEYFILE=C:\fbr-middleware\key.pem`.
   Restart the service after every renewal.
@@ -368,7 +368,7 @@ time comes, SAP's SM59 destination should use HTTPS. Two options:
 ## 9. SAP side
 
 Covered in `docs\SAP-ABAP-Interface-Spec.md` section 8: SM59 destination type G to
-`10.0.0.86` port `8080` (HTTP; switch to 443 / SSL active after section 8), STRUST import of the
+`10.0.0.86` port `8003` (HTTP; switch to 443 / SSL active after section 8), STRUST import of the
 certificate chain, `ZFBR_TOKEN` for the PRAL tokens, client timeout at
 least 200 s, and GET before any resend after a 504 or a timeout.
 
@@ -393,7 +393,7 @@ Copy-Item -Recurse -Force C:\fbr-middleware\data C:\fbr-middleware\backup\data-$
 cd C:\fbr-middleware; git pull
 .\venv\Scripts\python.exe -m pip install -e .; .\venv\Scripts\python.exe -m pip check
 Start-Service FbrMiddleware
-git -C C:\fbr-middleware log -1 --oneline; Get-Service FbrMiddleware; Invoke-RestMethod http://localhost:8080/health
+git -C C:\fbr-middleware log -1 --oneline; Get-Service FbrMiddleware; Invoke-RestMethod http://localhost:8003/health
 ```
 
 Confirm the running process has the new code: a restart that silently failed looks exactly like a
@@ -426,7 +426,7 @@ Stops and removes the service and the firewall rule; the directory, `.env` and d
 
 ## 11. Things that cost us time
 
-**Port 8000 is OgraApi's.** The middleware defaults to 8080 and the install script refuses to
+**Port 8000 is OgraApi's.** The middleware defaults to 8003 and the install script refuses to
 register the service while something else listens on `LISTEN_PORT`. If the service starts and dies
 within seconds and `service.err.log` says `WinError 10048` / "address already in use", the port in
 `.env` collides with another application.
@@ -440,7 +440,7 @@ within seconds and `service.err.log` says `WinError 10048` / "address already in
 **cmd is not PowerShell.** A `C:\>` prompt is cmd.exe: `;` does not separate commands there, so
 `cd C:\fbr-middleware; powershell ...` fails with "The filename, directory name, or volume label
 syntax is incorrect". Type `powershell` first, or in cmd write
-`cd /d C:\fbr-middleware && powershell -ExecutionPolicy Bypass -File deploy\windows\preflight.ps1 -Root C:\fbr-middleware -Port 8080`.
+`cd /d C:\fbr-middleware && powershell -ExecutionPolicy Bypass -File deploy\windows\preflight.ps1 -Root C:\fbr-middleware -Port 8003`.
 
 **PowerShell is not bash.** `&&` and `||` are parser errors in Windows PowerShell 5.1; use `;` or
 `if ($?) { ... }`. `curl` is an alias for `Invoke-WebRequest`; call `curl.exe` when you mean curl.

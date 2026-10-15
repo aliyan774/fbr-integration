@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "FBR Middleware - PRL server (values inline)",
-    "description": "## Request\n\n`POST http://10.0.0.86:8080/api/v1/{env}/invoices` where `env` is `dev` (PRAL sandbox) or `prd` (PRAL production).\n\nHeaders (both required, 401 otherwise):\n\n| Header | Value |\n|---|---|\n| `X-API-Key` | key issued by the middleware (`MIDDLEWARE_API_KEYS`) |\n| `Authorization` | `Bearer <PRAL token>` for the chosen environment (ABAP reads it from ZFBR_TOKEN by SELLER_NTN + ENV) |\n\nBody (envelope):\n\n| Field | Type | Required | Rule |\n|---|---|---|---|\n| `erpInvoiceNo` | string 1-50 | yes | SAP billing document; idempotency key per environment |\n| `sellerNtn` | string | yes | 7-digit NTN or 13-digit CNIC; must equal `invoice.sellerNTNCNIC` |\n| `callbackRef` | string <=100 | no | echoed back unchanged |\n| `invoice` | object | yes | PRAL payload (header + items), see the sample body |\n\nConditional rules enforced before anything is stored (422 with `detail[].field`):\n`buyerNTNCNIC` required when `buyerRegistrationType` is `Registered` and must differ from the seller;\n`invoiceRefNo` required (22 or 28 chars) for `Debit Note`, must be empty for `Sale Invoice`;\n`scenarioId` (SN001..SN028) required on `dev`, ignored/stripped on `prd`;\n`hsCode` matches `^\\d{4}\\.\\d{4}$`; `quantity` > 0; money fields >= 0 with 2 decimals;\n`salesTaxWithheldAtSource` is 0 or equal to `salesTaxApplicable`; `invoiceDate` is YYYY-MM-DD and not in the future.\nUnknown keys are rejected.\n\n## Response\n\nEnvelope with `status` -> HTTP: SUBMITTED 201, replayed 200, REJECTED_LOCAL / REJECTED_FBR 422,\nFAILED_UPSTREAM / AUTH_ERROR 502, UNKNOWN 504. `pralResponse` is PRAL's body verbatim; `errorDescriptions`\nexplains each PRAL `errorCode`. `X-Tracking-Id` header = `trackingId`.\n",
+    "description": "## Request\n\n`POST http://10.0.0.86:8003/api/v1/{env}/invoices` where `env` is `dev` (PRAL sandbox) or `prd` (PRAL production).\n\nHeaders (both required, 401 otherwise):\n\n| Header | Value |\n|---|---|\n| `X-API-Key` | key issued by the middleware (`MIDDLEWARE_API_KEYS`) |\n| `Authorization` | `Bearer <PRAL token>` for the chosen environment (ABAP reads it from ZFBR_TOKEN by SELLER_NTN + ENV) |\n\nBody (envelope):\n\n| Field | Type | Required | Rule |\n|---|---|---|---|\n| `erpInvoiceNo` | string 1-50 | yes | SAP billing document; idempotency key per environment |\n| `sellerNtn` | string | yes | 7-digit NTN or 13-digit CNIC; must equal `invoice.sellerNTNCNIC` |\n| `callbackRef` | string <=100 | no | echoed back unchanged |\n| `invoice` | object | yes | PRAL payload (header + items), see the sample body |\n\nConditional rules enforced before anything is stored (422 with `detail[].field`):\n`buyerNTNCNIC` required when `buyerRegistrationType` is `Registered` and must differ from the seller;\n`invoiceRefNo` required (22 or 28 chars) for `Debit Note`, must be empty for `Sale Invoice`;\n`scenarioId` (SN001..SN028) required on `dev`, ignored/stripped on `prd`;\n`hsCode` matches `^\\d{4}\\.\\d{4}$`; `quantity` > 0; money fields >= 0 with 2 decimals;\n`salesTaxWithheldAtSource` is 0 or equal to `salesTaxApplicable`; `invoiceDate` is YYYY-MM-DD and not in the future.\nUnknown keys are rejected.\n\n## Response\n\nEnvelope with `status` -> HTTP: SUBMITTED 201, replayed 200, REJECTED_LOCAL / REJECTED_FBR 422,\nFAILED_UPSTREAM / AUTH_ERROR 502, UNKNOWN 504. `pralResponse` is PRAL's body verbatim; `errorDescriptions`\nexplains each PRAL `errorCode`. `X-Tracking-Id` header = `trackingId`.\n",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [
@@ -16,7 +16,7 @@
           }
         ],
         "url": {
-          "raw": "http://10.0.0.86:8080/health",
+          "raw": "http://10.0.0.86:8003/health",
           "protocol": "http",
           "host": [
             "10",
@@ -24,7 +24,7 @@
             "0",
             "86"
           ],
-          "port": "8080",
+          "port": "8003",
           "path": [
             "health"
           ]
@@ -75,7 +75,7 @@
               }
             ],
             "url": {
-              "raw": "http://10.0.0.86:8080/api/v1/dev/invoices/validate",
+              "raw": "http://10.0.0.86:8003/api/v1/dev/invoices/validate",
               "protocol": "http",
               "host": [
                 "10",
@@ -83,7 +83,7 @@
                 "0",
                 "86"
               ],
-              "port": "8080",
+              "port": "8003",
               "path": [
                 "api",
                 "v1",
@@ -151,7 +151,7 @@
               }
             ],
             "url": {
-              "raw": "http://10.0.0.86:8080/api/v1/dev/invoices",
+              "raw": "http://10.0.0.86:8003/api/v1/dev/invoices",
               "protocol": "http",
               "host": [
                 "10",
@@ -159,7 +159,7 @@
                 "0",
                 "86"
               ],
-              "port": "8080",
+              "port": "8003",
               "path": [
                 "api",
                 "v1",
@@ -210,7 +210,7 @@
               "originalRequest": {
                 "method": "POST",
                 "url": {
-                  "raw": "http://10.0.0.86:8080/api/v1/dev/invoices"
+                  "raw": "http://10.0.0.86:8003/api/v1/dev/invoices"
                 }
               },
               "status": "Created",
@@ -251,7 +251,7 @@
               }
             ],
             "url": {
-              "raw": "http://10.0.0.86:8080/api/v1/dev/invoices",
+              "raw": "http://10.0.0.86:8003/api/v1/dev/invoices",
               "protocol": "http",
               "host": [
                 "10",
@@ -259,7 +259,7 @@
                 "0",
                 "86"
               ],
-              "port": "8080",
+              "port": "8003",
               "path": [
                 "api",
                 "v1",
@@ -319,7 +319,7 @@
               }
             ],
             "url": {
-              "raw": "http://10.0.0.86:8080/api/v1/dev/invoices/0090000001",
+              "raw": "http://10.0.0.86:8003/api/v1/dev/invoices/0090000001",
               "protocol": "http",
               "host": [
                 "10",
@@ -327,7 +327,7 @@
                 "0",
                 "86"
               ],
-              "port": "8080",
+              "port": "8003",
               "path": [
                 "api",
                 "v1",
@@ -363,7 +363,7 @@
               "originalRequest": {
                 "method": "GET",
                 "url": {
-                  "raw": "http://10.0.0.86:8080/api/v1/dev/invoices/0090000001"
+                  "raw": "http://10.0.0.86:8003/api/v1/dev/invoices/0090000001"
                 }
               },
               "status": "OK",
@@ -404,7 +404,7 @@
               }
             ],
             "url": {
-              "raw": "http://10.0.0.86:8080/api/v1/dev/invoices",
+              "raw": "http://10.0.0.86:8003/api/v1/dev/invoices",
               "protocol": "http",
               "host": [
                 "10",
@@ -412,7 +412,7 @@
                 "0",
                 "86"
               ],
-              "port": "8080",
+              "port": "8003",
               "path": [
                 "api",
                 "v1",
@@ -482,7 +482,7 @@
               }
             ],
             "url": {
-              "raw": "http://10.0.0.86:8080/api/v1/prd/invoices",
+              "raw": "http://10.0.0.86:8003/api/v1/prd/invoices",
               "protocol": "http",
               "host": [
                 "10",
@@ -490,7 +490,7 @@
                 "0",
                 "86"
               ],
-              "port": "8080",
+              "port": "8003",
               "path": [
                 "api",
                 "v1",
@@ -551,7 +551,7 @@
               }
             ],
             "url": {
-              "raw": "http://10.0.0.86:8080/api/v1/prd/invoices/0090000001",
+              "raw": "http://10.0.0.86:8003/api/v1/prd/invoices/0090000001",
               "protocol": "http",
               "host": [
                 "10",
@@ -559,7 +559,7 @@
                 "0",
                 "86"
               ],
-              "port": "8080",
+              "port": "8003",
               "path": [
                 "api",
                 "v1",
@@ -610,7 +610,7 @@
               }
             ],
             "url": {
-              "raw": "http://10.0.0.86:8080/api/v1/dev/invoices",
+              "raw": "http://10.0.0.86:8003/api/v1/dev/invoices",
               "protocol": "http",
               "host": [
                 "10",
@@ -618,7 +618,7 @@
                 "0",
                 "86"
               ],
-              "port": "8080",
+              "port": "8003",
               "path": [
                 "api",
                 "v1",
@@ -670,7 +670,7 @@
               }
             ],
             "url": {
-              "raw": "http://10.0.0.86:8080/api/v1/dev/invoices",
+              "raw": "http://10.0.0.86:8003/api/v1/dev/invoices",
               "protocol": "http",
               "host": [
                 "10",
@@ -678,7 +678,7 @@
                 "0",
                 "86"
               ],
-              "port": "8080",
+              "port": "8003",
               "path": [
                 "api",
                 "v1",
@@ -735,7 +735,7 @@
               }
             ],
             "url": {
-              "raw": "http://10.0.0.86:8080/api/v1/qa/invoices",
+              "raw": "http://10.0.0.86:8003/api/v1/qa/invoices",
               "protocol": "http",
               "host": [
                 "10",
@@ -743,7 +743,7 @@
                 "0",
                 "86"
               ],
-              "port": "8080",
+              "port": "8003",
               "path": [
                 "api",
                 "v1",
@@ -800,7 +800,7 @@
               }
             ],
             "url": {
-              "raw": "http://10.0.0.86:8080/api/v1/dev/invoices",
+              "raw": "http://10.0.0.86:8003/api/v1/dev/invoices",
               "protocol": "http",
               "host": [
                 "10",
@@ -808,7 +808,7 @@
                 "0",
                 "86"
               ],
-              "port": "8080",
+              "port": "8003",
               "path": [
                 "api",
                 "v1",
@@ -845,7 +845,7 @@
               "originalRequest": {
                 "method": "POST",
                 "url": {
-                  "raw": "http://10.0.0.86:8080/api/v1/dev/invoices"
+                  "raw": "http://10.0.0.86:8003/api/v1/dev/invoices"
                 }
               },
               "status": "Unprocessable Entity",
@@ -886,7 +886,7 @@
               }
             ],
             "url": {
-              "raw": "http://10.0.0.86:8080/api/v1/dev/invoices",
+              "raw": "http://10.0.0.86:8003/api/v1/dev/invoices",
               "protocol": "http",
               "host": [
                 "10",
@@ -894,7 +894,7 @@
                 "0",
                 "86"
               ],
-              "port": "8080",
+              "port": "8003",
               "path": [
                 "api",
                 "v1",
@@ -952,7 +952,7 @@
               }
             ],
             "url": {
-              "raw": "http://10.0.0.86:8080/api/v1/dev/invoices",
+              "raw": "http://10.0.0.86:8003/api/v1/dev/invoices",
               "protocol": "http",
               "host": [
                 "10",
@@ -960,7 +960,7 @@
                 "0",
                 "86"
               ],
-              "port": "8080",
+              "port": "8003",
               "path": [
                 "api",
                 "v1",
@@ -1005,7 +1005,7 @@
               "originalRequest": {
                 "method": "POST",
                 "url": {
-                  "raw": "http://10.0.0.86:8080/api/v1/dev/invoices"
+                  "raw": "http://10.0.0.86:8003/api/v1/dev/invoices"
                 }
               },
               "status": "Unprocessable Entity",
@@ -1046,7 +1046,7 @@
               }
             ],
             "url": {
-              "raw": "http://10.0.0.86:8080/api/v1/dev/invoices",
+              "raw": "http://10.0.0.86:8003/api/v1/dev/invoices",
               "protocol": "http",
               "host": [
                 "10",
@@ -1054,7 +1054,7 @@
                 "0",
                 "86"
               ],
-              "port": "8080",
+              "port": "8003",
               "path": [
                 "api",
                 "v1",
@@ -1112,7 +1112,7 @@
               }
             ],
             "url": {
-              "raw": "http://10.0.0.86:8080/api/v1/dev/invoices",
+              "raw": "http://10.0.0.86:8003/api/v1/dev/invoices",
               "protocol": "http",
               "host": [
                 "10",
@@ -1120,7 +1120,7 @@
                 "0",
                 "86"
               ],
-              "port": "8080",
+              "port": "8003",
               "path": [
                 "api",
                 "v1",

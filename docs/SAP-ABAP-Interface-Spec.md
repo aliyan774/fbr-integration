@@ -33,7 +33,7 @@ A validate rejection stops before post; a post answer, timeout or auth failure e
 
 ## 2. Endpoints, method and headers
 
-SAP calls the middleware, never PRAL. The host and port come from the SM59 destination: middleware server `10.0.0.86`, port `8080` (plain HTTP during development; HTTPS on 443 once TLS is set up on the server). Only the path differs per environment. Example: `http://10.0.0.86:8080/api/v1/dev/invoices`.
+SAP calls the middleware, never PRAL. The host and port come from the SM59 destination: middleware server `10.0.0.86`, port `8003` (plain HTTP during development; HTTPS on 443 once TLS is set up on the server). Only the path differs per environment. Example: `http://10.0.0.86:8003/api/v1/dev/invoices`.
 
 | Method | Path | Headers | Purpose |
 | --- | --- | --- | --- |
@@ -481,9 +481,9 @@ Worst case per submission is two PRAL calls with up to three attempts each at 30
 
 | Item | Detail |
 | --- | --- |
-| SM59 destination | type G (HTTP to external server), target host `10.0.0.86`, service no. `8080` (later 443 with SSL active when TLS is in place), path prefix empty. Created on SAP DEV (`10.0.0.38`, SID DEV, instance 00) first; the same destination definition is transported to QAS/PRD. One destination per PRAL environment is not needed; the URL path chooses `dev` or `prd`. Timeout 200 s. |
+| SM59 destination | type G (HTTP to external server), target host `10.0.0.86`, service no. `8003` (later 443 with SSL active when TLS is in place), path prefix empty. Created on SAP DEV (`10.0.0.38`, SID DEV, instance 00) first; the same destination definition is transported to QAS/PRD. One destination per PRAL environment is not needed; the URL path chooses `dev` or `prd`. Timeout 200 s. |
 | STRUST | import the middleware's TLS certificate chain into the SSL client (Anonymous or Standard) PSE used by the destination |
-| Network | the SAP application server (DEV: `10.0.0.38`) must reach `10.0.0.86:8080`; the middleware firewall allows only listed SAP server addresses, so QAS/PRD servers must be added before they go live |
+| Network | the SAP application server (DEV: `10.0.0.38`) must reach `10.0.0.86:8003`; the middleware firewall allows only listed SAP server addresses, so QAS/PRD servers must be added before they go live |
 | API key | the middleware team issues one key per SAP system; keep it in the SM59 header or a secure Z table, not in code |
 | Authorization | a Z authorization object for the send and reprocess transactions |
 
