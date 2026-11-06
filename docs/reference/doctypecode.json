@@ -1,0 +1,10 @@
+[
+  {
+    "docTypeId": 9,
+    "docDescription": "Debit Note"
+  },
+  {
+    "docTypeId": 4,
+    "docDescription": "Sale Invoice"
+  }
+]

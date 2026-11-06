@@ -43,6 +43,7 @@ SAP calls the middleware, never PRAL. The host and port come from the SM59 desti
 | POST | `/api/v1/prd/invoices/validate` | same as the submit call | Dry run against production validation, same guarantees |
 | GET | `/api/v1/dev/invoices/{erpInvoiceNo}` | `X-API-Key` | Stored result of an earlier sandbox submission |
 | GET | `/api/v1/prd/invoices/{erpInvoiceNo}` | `X-API-Key` | Stored result of an earlier production submission; call it after a 504 or an ABAP-side timeout before resubmitting |
+| GET | `/api/v1/dev/token-check` and `/api/v1/prd/token-check` | `X-API-Key`, `Authorization: Bearer <token>` | Token check: calls PRAL's reference API `/pdi/v1/provinces` with the token. 200 `tokenStatus: OK` with the province list, or 502 `AUTH_ERROR` / `FAILED_UPSTREAM`. Needs no seller NTN, stores nothing. Run it after every change to `ZFBR_TOKEN` |
 | GET | `/health` | none | Liveness: DB check, in-flight count, PRAL URLs |
 | GET | `/` | none | Answers 200 with the service name, so the SM59 "Connection Test" button (which calls `/`) shows success |
 
@@ -276,6 +277,13 @@ The billing document (`VBRK` / `VBRP`) is the source; master data supplies the p
 | `ZFBR_SCENARIO` | `SALE_TYPE` | `SCENARIO_ID` | spec section 9, sandbox certification only |
 
 The description strings must match PRAL's reference data character for character; a mismatch is a PRAL rejection (error 0046, 0052, 0099), not a warning.
+
+### 5.4 PRAL reference lists as actually served (captured 2026-11-06 with the sandbox token)
+
+The lists are in the repository under `docs/reference/` (`provinces.json`, `doctypecode.json`, `uom.json`, `transtypecode.json`, `sroitemcode.json`) for filling the Z tables. Two things they show that the spec does not:
+
+- Provinces come back in upper case: `BALOCHISTAN`, `AZAD JAMMU AND KASHMIR`, `CAPITAL TERRITORY`, `KHYBER PAKHTUNKHWA`, `PUNJAB`, `SINDH`, `GILGIT BALTISTAN`. The spec's invoice sample sends `Sindh`. Whether PRAL compares case-insensitively is not documented; use the reference spelling in `ZFBR_PROVINCE` until a sandbox run with the mixed-case value proves otherwise.
+- Some sale type descriptions carry leading or trailing spaces exactly as served, for example `" 3rd Schedule Goods "` and `" Services (FED in ST Mode) "`. Store them verbatim in `ZFBR_TAXMAP`; a trimmed value may not match.
 
 ## 6. Expected response
 

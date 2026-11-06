@@ -12,7 +12,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from . import __version__
-from .api import health, invoices
+from .api import health, invoices, token
 from .clients.pral import PralClient
 from .config import get_settings
 from .db.session import init_db, make_engine, make_session_factory
@@ -91,6 +91,7 @@ def create_app() -> FastAPI:
     )
     app.add_exception_handler(RequestValidationError, validation_error_handler)  # type: ignore[arg-type]
     app.include_router(invoices.router)
+    app.include_router(token.router)
     app.include_router(health.router)
     return app
 

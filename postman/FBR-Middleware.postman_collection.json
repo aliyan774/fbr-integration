@@ -84,6 +84,55 @@
       "description": "Routes to validateinvoicedata_sb / postinvoicedata_sb. scenarioId is required. Uses {{devToken}}.",
       "item": [
         {
+          "name": "0a. Token check",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}",
+                "description": "Middleware API key (MIDDLEWARE_API_KEYS)"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{devToken}}",
+                "description": "PRAL Bearer token for this environment, from ZFBR_TOKEN"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/dev/token-check",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "dev",
+                "token-check"
+              ]
+            },
+            "description": "Verifies the PRAL Bearer token against PRAL's reference API (/pdi/v1/provinces). Needs no seller NTN and stores nothing. 200 with tokenStatus OK and the province list, or 502 with tokenStatus AUTH_ERROR (PRAL rejected the token) / FAILED_UPSTREAM (PRAL unreachable). Run this first after updating ZFBR_TOKEN."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('tokenStatus OK', () => pm.expect(pm.response.json().tokenStatus).to.eql('OK'));",
+                  "pm.test('provinces returned', () => pm.expect(pm.response.json().provinces).to.be.an('array').that.is.not.empty);"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
           "name": "0. Validate only (dry run)",
           "request": {
             "method": "POST",

@@ -1,0 +1,178 @@
+[
+  {
+    "uoM_ID": 3,
+    "description": "MT"
+  },
+  {
+    "uoM_ID": 4,
+    "description": "Bill of lading"
+  },
+  {
+    "uoM_ID": 5,
+    "description": "SET"
+  },
+  {
+    "uoM_ID": 6,
+    "description": "KWH"
+  },
+  {
+    "uoM_ID": 8,
+    "description": "40KG"
+  },
+  {
+    "uoM_ID": 9,
+    "description": "Liter"
+  },
+  {
+    "uoM_ID": 11,
+    "description": "SqY"
+  },
+  {
+    "uoM_ID": 12,
+    "description": "Bag"
+  },
+  {
+    "uoM_ID": 13,
+    "description": "KG"
+  },
+  {
+    "uoM_ID": 46,
+    "description": "MMBTU"
+  },
+  {
+    "uoM_ID": 48,
+    "description": "Meter"
+  },
+  {
+    "uoM_ID": 50,
+    "description": "Pcs"
+  },
+  {
+    "uoM_ID": 53,
+    "description": "Carat"
+  },
+  {
+    "uoM_ID": 55,
+    "description": "Cubic Metre"
+  },
+  {
+    "uoM_ID": 57,
+    "description": "Dozen"
+  },
+  {
+    "uoM_ID": 59,
+    "description": "Gram"
+  },
+  {
+    "uoM_ID": 61,
+    "description": "Gallon"
+  },
+  {
+    "uoM_ID": 63,
+    "description": "Kilogram"
+  },
+  {
+    "uoM_ID": 65,
+    "description": "Pound"
+  },
+  {
+    "uoM_ID": 67,
+    "description": "Timber Logs"
+  },
+  {
+    "uoM_ID": 69,
+    "description": "Numbers, pieces, units"
+  },
+  {
+    "uoM_ID": 71,
+    "description": "Packs"
+  },
+  {
+    "uoM_ID": 73,
+    "description": "Pair"
+  },
+  {
+    "uoM_ID": 75,
+    "description": "Square Foot"
+  },
+  {
+    "uoM_ID": 77,
+    "description": "Square Metre"
+  },
+  {
+    "uoM_ID": 79,
+    "description": "Thousand Unit"
+  },
+  {
+    "uoM_ID": 81,
+    "description": "Mega Watt"
+  },
+  {
+    "uoM_ID": 83,
+    "description": "Foot"
+  },
+  {
+    "uoM_ID": 85,
+    "description": "Barrels"
+  },
+  {
+    "uoM_ID": 87,
+    "description": "NO"
+  },
+  {
+    "uoM_ID": 118,
+    "description": "Meter"
+  },
+  {
+    "uoM_ID": 120,
+    "description": "MT"
+  },
+  {
+    "uoM_ID": 110,
+    "description": "KWH"
+  },
+  {
+    "uoM_ID": 112,
+    "description": "Packs"
+  },
+  {
+    "uoM_ID": 114,
+    "description": "Meter"
+  },
+  {
+    "uoM_ID": 116,
+    "description": "Liter"
+  },
+  {
+    "uoM_ID": 117,
+    "description": "Bag"
+  },
+  {
+    "uoM_ID": 98,
+    "description": "MMBTU"
+  },
+  {
+    "uoM_ID": 99,
+    "description": "Numbers, pieces, units"
+  },
+  {
+    "uoM_ID": 100,
+    "description": "Square Foot"
+  },
+  {
+    "uoM_ID": 101,
+    "description": "Thousand Unit"
+  },
+  {
+    "uoM_ID": 102,
+    "description": "Barrels"
+  },
+  {
+    "uoM_ID": 88,
+    "description": "Others"
+  },
+  {
+    "uoM_ID": 96,
+    "description": "1000 kWh"
+  }
+]

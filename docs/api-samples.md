@@ -11,6 +11,7 @@ collection `postman/FBR-Middleware.postman_collection.json`.
 | POST | `/api/v1/prd/invoices` | `X-API-Key`, `Authorization: Bearer <production token>` | Submit to PRAL production |
 | POST | `/api/v1/{dev\|prd}/invoices/validate` | same as submit | Dry run: local rules + PRAL `validateinvoicedata`, nothing posted or stored; `status` VALIDATED (200) or a rejection |
 | GET | `/api/v1/{dev\|prd}/invoices/{erpInvoiceNo}` | `X-API-Key` | Stored result |
+| GET | `/api/v1/{dev\|prd}/token-check` | `X-API-Key`, `Authorization: Bearer <token>` | Token check against PRAL's reference API; 200 `tokenStatus: OK` or 502 `AUTH_ERROR` / `FAILED_UPSTREAM`; nothing stored |
 | GET | `/health` | none | Liveness, DB, in-flight, PRAL URLs per environment |
 
 ## Request body: `POST /api/v1/{env}/invoices`

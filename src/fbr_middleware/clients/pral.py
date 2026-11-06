@@ -133,6 +133,17 @@ class PralClient:
     ) -> PralResult:
         return await self._call("post", env.post_url, payload_json, token, attempts)
 
+    async def check_token(self, env: FbrEnvironment, token: str) -> PralResult:
+        """GET /pdi/v1/provinces with the token. 200 + list = token accepted; 401 = rejected.
+
+        The reference APIs take the same Bearer token as the invoice APIs, need no seller NTN and
+        create nothing, so this is a pure token check. No retry; httpx errors propagate.
+        """
+        url = f"{env.base_url}/pdi/v1/provinces"
+        t0 = time.perf_counter()
+        resp = await self.http.get(url, headers={"Authorization": f"Bearer {token}", "Accept": "application/json"})
+        return _to_result("token-check", url, resp, _ms(t0))
+
     async def _call(
         self,
         call: str,

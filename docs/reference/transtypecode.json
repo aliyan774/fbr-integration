@@ -1,0 +1,106 @@
+[
+  {
+    "transactioN_TYPE_ID": 75,
+    "transactioN_DESC": "Goods at standard rate (default)"
+  },
+  {
+    "transactioN_TYPE_ID": 24,
+    "transactioN_DESC": "Goods at Reduced Rate"
+  },
+  {
+    "transactioN_TYPE_ID": 80,
+    "transactioN_DESC": "Goods at zero-rate"
+  },
+  {
+    "transactioN_TYPE_ID": 85,
+    "transactioN_DESC": "Petroleum Products"
+  },
+  {
+    "transactioN_TYPE_ID": 62,
+    "transactioN_DESC": "Electricity Supply to Retailers"
+  },
+  {
+    "transactioN_TYPE_ID": 129,
+    "transactioN_DESC": "SIM"
+  },
+  {
+    "transactioN_TYPE_ID": 77,
+    "transactioN_DESC": "Gas to CNG stations"
+  },
+  {
+    "transactioN_TYPE_ID": 122,
+    "transactioN_DESC": "Mobile Phones"
+  },
+  {
+    "transactioN_TYPE_ID": 25,
+    "transactioN_DESC": "Processing/Conversion of Goods"
+  },
+  {
+    "transactioN_TYPE_ID": 23,
+    "transactioN_DESC": " 3rd Schedule Goods "
+  },
+  {
+    "transactioN_TYPE_ID": 21,
+    "transactioN_DESC": "Goods (FED in ST Mode)"
+  },
+  {
+    "transactioN_TYPE_ID": 22,
+    "transactioN_DESC": " Services (FED in ST Mode) "
+  },
+  {
+    "transactioN_TYPE_ID": 18,
+    "transactioN_DESC": " Services "
+  },
+  {
+    "transactioN_TYPE_ID": 81,
+    "transactioN_DESC": "Exempt goods"
+  },
+  {
+    "transactioN_TYPE_ID": 82,
+    "transactioN_DESC": "DTRE goods"
+  },
+  {
+    "transactioN_TYPE_ID": 130,
+    "transactioN_DESC": "Cotton ginners"
+  },
+  {
+    "transactioN_TYPE_ID": 132,
+    "transactioN_DESC": "Electric Vehicle"
+  },
+  {
+    "transactioN_TYPE_ID": 134,
+    "transactioN_DESC": "Cement /Concrete Block"
+  },
+  {
+    "transactioN_TYPE_ID": 84,
+    "transactioN_DESC": "Telecommunication services"
+  },
+  {
+    "transactioN_TYPE_ID": 123,
+    "transactioN_DESC": "Steel melting and re-rolling"
+  },
+  {
+    "transactioN_TYPE_ID": 125,
+    "transactioN_DESC": "Ship breaking"
+  },
+  {
+    "transactioN_TYPE_ID": 115,
+    "transactioN_DESC": "Potassium Chlorate"
+  },
+  {
+    "transactioN_TYPE_ID": 178,
+    "transactioN_DESC": "CNG Sales"
+  },
+  {
+    "transactioN_TYPE_ID": 181,
+    "transactioN_DESC": "Toll Manufacturing"
+  },
+  {
+    "transactioN_TYPE_ID": 138,
+    "transactioN_DESC": "Non-Adjustable Supplies"
+  },
+  {
+    "transactioN_TYPE_ID": 139,
+    "transactioN_DESC": "Goods as per SRO.297(|)/2023"
+  }
+]

@@ -16,6 +16,7 @@ Behaviour triggers (so the SAP team can exercise every middleware outcome):
 * productDescription contains FAIL500  -> HTTP 500                        (FAILED_UPSTREAM after retries)
 * productDescription contains SLOW     -> sleeps 90 s                     (validate: FAILED_UPSTREAM, post: UNKNOWN)
 * otherwise                            -> valid; post issues ``<sellerNTN>DI<epoch ms>``
+* GET /pdi/v1/provinces, /pdi/v1/doctypecode -> the real reference lists (token check); 401 for ``bad``
 
 Run:  python tools\\mock_pral.py --port 9000
 Then point the middleware at it:  FBR_BASE_URL=http://localhost:9000
@@ -166,6 +167,30 @@ async def validate(request: Request, authorization: str | None = Header(default=
 @app.post("/di_data/v1/di/postinvoicedata_sb")
 async def post(request: Request, authorization: str | None = Header(default=None)) -> JSONResponse:
     return await _handle(request, authorization, issue_number=True)
+
+
+# Reference APIs (same Bearer token, no NTN). Lists captured from the real sandbox on 2026-11-06;
+# the full lists are in docs/reference/*.json.
+PROVINCES = [{"stateProvinceCode": 2, "stateProvinceDesc": "BALOCHISTAN"}, {"stateProvinceCode": 4, "stateProvinceDesc": "AZAD JAMMU AND KASHMIR"}, {"stateProvinceCode": 5, "stateProvinceDesc": "CAPITAL TERRITORY"}, {"stateProvinceCode": 6, "stateProvinceDesc": "KHYBER PAKHTUNKHWA"}, {"stateProvinceCode": 7, "stateProvinceDesc": "PUNJAB"}, {"stateProvinceCode": 8, "stateProvinceDesc": "SINDH"}, {"stateProvinceCode": 9, "stateProvinceDesc": "GILGIT BALTISTAN"}]
+DOCTYPES = [{"docTypeId": 9, "docDescription": "Debit Note"}, {"docTypeId": 4, "docDescription": "Sale Invoice"}]
+
+
+def _token_ok(authorization: str | None) -> bool:
+    return bool(authorization) and authorization.lower().startswith("bearer ") and authorization.split(None, 1)[1].strip() != "bad"
+
+
+@app.get("/pdi/v1/provinces")
+async def provinces(authorization: str | None = Header(default=None)) -> JSONResponse:
+    if not _token_ok(authorization):
+        return _unauthorized()
+    return JSONResponse(PROVINCES)
+
+
+@app.get("/pdi/v1/doctypecode")
+async def doctypecode(authorization: str | None = Header(default=None)) -> JSONResponse:
+    if not _token_ok(authorization):
+        return _unauthorized()
+    return JSONResponse(DOCTYPES)
 
 
 @app.get("/")
