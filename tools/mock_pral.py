@@ -10,7 +10,9 @@ Behaviour triggers (so the SAP team can exercise every middleware outcome):
 * any item with empty ``rate``        -> item-level invalid, errorCode 0046 (direct mock calls only:
                                          the middleware rejects an empty rate locally with 422)
 * any item with hsCode 9999.9999 or empty -> header-level invalid, errorCode 0052 (REJECTED_FBR)
-* productDescription contains AUTH0401 -> header-level errorCode 0401     (AUTH_ERROR)
+* productDescription contains AUTH0401 -> HTTP 401 with validationResponse errorCode 0401, as the real
+                                         gateway answers when the token is valid but not bound to the
+                                         seller NTN                              (AUTH_ERROR)
 * productDescription contains FAIL500  -> HTTP 500                        (FAILED_UPSTREAM after retries)
 * productDescription contains SLOW     -> sleeps 90 s                     (validate: FAILED_UPSTREAM, post: UNKNOWN)
 * otherwise                            -> valid; post issues ``<sellerNTN>DI<epoch ms>``
@@ -74,16 +76,18 @@ async def _handle(request: Request, authorization: str | None, issue_number: boo
         return JSONResponse(status_code=500, content={"message": "Internal Server Error (mock)"})
 
     if "AUTH0401" in descriptions:
+        # Observed from the real sandbox on 2026-11-06: valid token, seller NTN not bound to it.
         return JSONResponse(
-            status_code=200,
+            status_code=401,
             content={
                 "dated": _now(),
+                "sourceInvoiceNo": "",
                 "validationResponse": {
                     "statusCode": "01",
                     "status": "Invalid",
                     "errorCode": "0401",
-                    "error": "The provided seller NTN/CNIC does not have a valid or authorized access token",
-                    "invoiceStatuses": None,
+                    "error": "Unauthorized access: Provided seller registration number is not 13 digits (CNIC) "
+                    "or 7 digits (NTN) or the authorized token does not exist against seller registration number",
                 },
             },
         )

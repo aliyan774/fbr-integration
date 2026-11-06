@@ -422,8 +422,29 @@ returns the fault verbatim:
 }
 ```
 
-SAP action: do not retry; the token in `ZFBR_TOKEN` for this seller and environment is wrong,
-expired, or issued for the other environment. Fix it, then resubmit.
+A second 401 shape, observed with a valid sandbox token whose seller NTN did not match the payload: PRAL
+answers HTTP 401 with a `validationResponse` carrying `errorCode: "0401"` ("the authorized token does not
+exist against seller registration number"). The middleware returns it the same way, `status: AUTH_ERROR`,
+`pralHttpStatus: 401`, and fills `errorDescriptions` with the 0401 text:
+
+```json
+{
+  "status": "AUTH_ERROR",
+  "pralHttpStatus": 401,
+  "pralResponse": {
+    "dated": "2026-11-06 18:16:57",
+    "sourceInvoiceNo": "",
+    "validationResponse": { "statusCode": "01", "status": "Invalid", "errorCode": "0401",
+      "error": "Unauthorized access: Provided seller registration number is not 13 digits (CNIC) or 7 digits (NTN) or the authorized token does not exist against seller registration number" }
+  },
+  "errorDescriptions": [ { "code": "0401", "description": "Unauthorized access: ..." } ]
+}
+```
+
+SAP action for both shapes: do not retry. Fault 900901 means the token itself is wrong, expired, or for the
+other environment; error 0401 means the token is fine but `sellerNTNCNIC` in the payload is not the
+registration it was issued for (0402 is the same for the buyer). Fix `ZFBR_TOKEN` or the seller mapping,
+then resubmit.
 
 ## 7. Validations and data formats
 
