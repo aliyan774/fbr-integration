@@ -521,3 +521,9 @@ Parameters, if the defaults do not suit:
 `-SkipFirewall` when IIS fronts the service and `LISTEN_HOST` is `127.0.0.1`.
 `deploy\windows\uninstall-service.ps1 -ServiceName FbrMiddleware` reverses the service and firewall
 parts. `deploy\windows\preflight.ps1` is section 2 and changes nothing.
+
+`deploy\windows\make-filled-collection.ps1 -Token <sandbox token>` builds a ready-to-run Postman
+collection on the server: it reads the API key and port from `.env` without printing the key,
+fills the key and the PRAL token(s) into the inline collection, writes
+`FBR-sandbox-filled.postman_collection.json` (git-ignored, contains secrets) and proves both with
+a token check. Run it elevated; `.env` is readable by Administrators only.

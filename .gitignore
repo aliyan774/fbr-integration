@@ -18,3 +18,6 @@ venv/
 *.db-shm
 data/
 logs/
+
+# Postman collections with real keys/tokens filled in (deploy/windows/make-filled-collection.ps1)
+*-filled.postman_collection.json
