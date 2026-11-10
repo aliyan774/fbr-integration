@@ -22,6 +22,12 @@
       "type": "string"
     },
     {
+      "key": "devValidateToken",
+      "value": "sandbox-validate-token-from-portal",
+      "type": "string",
+      "description": "Portal 'Sandbox Security Token' for validateinvoicedata_sb; same value as devToken today"
+    },
+    {
       "key": "prdToken",
       "value": "production-token-from-ZFBR_TOKEN",
       "type": "string"
@@ -1205,6 +1211,143 @@
                 "exec": [
                   "pm.test('HTTP 502', () => pm.response.to.have.status(502));",
                   "pm.test('status FAILED_UPSTREAM after 3 attempts', () => { const b = pm.response.json(); pm.expect(b.status).to.eql('FAILED_UPSTREAM'); pm.expect(b.attempts).to.eql(3); });"
+                ]
+              }
+            }
+          ],
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "PRAL direct (sandbox)",
+      "description": "The two PRAL sandbox endpoints from the FBR portal's Environment Details, called directly, each with its own token. Not through the middleware: no X-API-Key, and the body is the bare PRAL invoice, not the envelope. Use these to tell a PRAL-side problem from a middleware-side one. The two tokens issued on the portal are currently the same value; the middleware forwards one Bearer to both endpoints, so if PRAL ever issues different tokens per endpoint the middleware contract needs a second header.",
+      "item": [
+        {
+          "name": "1. validateinvoicedata_sb (Sandbox Security Token)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{devValidateToken}}",
+                "description": "Portal: 'API for Sandbox Invoices Detail' - Sandbox Security Token"
+              }
+            ],
+            "url": {
+              "raw": "https://gw.fbr.gov.pk/di_data/v1/di/validateinvoicedata_sb",
+              "protocol": "https",
+              "host": [
+                "gw",
+                "fbr",
+                "gov",
+                "pk"
+              ],
+              "path": [
+                "di_data",
+                "v1",
+                "di",
+                "validateinvoicedata_sb"
+              ]
+            },
+            "description": "Validates the invoice at PRAL without issuing a number. 401 with errorCode 0401 means the token is valid but sellerNTNCNIC in the body is not the registration it was issued for.",
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"invoiceType\": \"Sale Invoice\",\n  \"invoiceDate\": \"2025-04-21\",\n  \"sellerNTNCNIC\": \"0786909\",\n  \"sellerBusinessName\": \"Company 8\",\n  \"sellerProvince\": \"Sindh\",\n  \"sellerAddress\": \"Karachi\",\n  \"buyerNTNCNIC\": \"1000000000000\",\n  \"buyerBusinessName\": \"FERTILIZER MANUFAC IRS NEW\",\n  \"buyerProvince\": \"Sindh\",\n  \"buyerAddress\": \"Karachi\",\n  \"buyerRegistrationType\": \"Registered\",\n  \"invoiceRefNo\": \"\",\n  \"scenarioId\": \"SN001\",\n  \"items\": [\n    {\n      \"hsCode\": \"0101.2100\",\n      \"productDescription\": \"product Description\",\n      \"rate\": \"18%\",\n      \"uoM\": \"Numbers, pieces, units\",\n      \"quantity\": 1.0,\n      \"totalValues\": 0.0,\n      \"valueSalesExcludingST\": 1000.0,\n      \"fixedNotifiedValueOrRetailPrice\": 0.0,\n      \"salesTaxApplicable\": 180.0,\n      \"salesTaxWithheldAtSource\": 0.0,\n      \"extraTax\": 0.0,\n      \"furtherTax\": 120.0,\n      \"sroScheduleNo\": \"\",\n      \"fedPayable\": 0.0,\n      \"discount\": 0.0,\n      \"saleType\": \"Goods at standard rate (default)\",\n      \"sroItemSerialNo\": \"\"\n    }\n  ]\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const vr = (pm.response.json().validationResponse) || {};",
+                  "pm.test('Header statusCode is 00', () => pm.expect(vr.statusCode, `header error ${vr.errorCode}: ${vr.error}`).to.eql('00'));",
+                  "pm.test('Every item statusCode is 00', () => {",
+                  "    const failed = (vr.invoiceStatuses || []).filter(i => i.statusCode !== '00').map(i => `item ${i.itemSNo}: ${i.errorCode} ${i.error}`);",
+                  "    pm.expect(failed, failed.join(' | ')).to.be.empty;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "2. postinvoicedata_sb (Token)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{devToken}}",
+                "description": "Portal: 'API for Sandbox' - Token"
+              }
+            ],
+            "url": {
+              "raw": "https://gw.fbr.gov.pk/di_data/v1/di/postinvoicedata_sb",
+              "protocol": "https",
+              "host": [
+                "gw",
+                "fbr",
+                "gov",
+                "pk"
+              ],
+              "path": [
+                "di_data",
+                "v1",
+                "di",
+                "postinvoicedata_sb"
+              ]
+            },
+            "description": "Posts the invoice to the PRAL sandbox and returns a sandbox FBR invoice number. PRAL has no idempotency: every successful call issues a new number.",
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"invoiceType\": \"Sale Invoice\",\n  \"invoiceDate\": \"2025-04-21\",\n  \"sellerNTNCNIC\": \"0786909\",\n  \"sellerBusinessName\": \"Company 8\",\n  \"sellerProvince\": \"Sindh\",\n  \"sellerAddress\": \"Karachi\",\n  \"buyerNTNCNIC\": \"1000000000000\",\n  \"buyerBusinessName\": \"FERTILIZER MANUFAC IRS NEW\",\n  \"buyerProvince\": \"Sindh\",\n  \"buyerAddress\": \"Karachi\",\n  \"buyerRegistrationType\": \"Registered\",\n  \"invoiceRefNo\": \"\",\n  \"scenarioId\": \"SN001\",\n  \"items\": [\n    {\n      \"hsCode\": \"0101.2100\",\n      \"productDescription\": \"product Description\",\n      \"rate\": \"18%\",\n      \"uoM\": \"Numbers, pieces, units\",\n      \"quantity\": 1.0,\n      \"totalValues\": 0.0,\n      \"valueSalesExcludingST\": 1000.0,\n      \"fixedNotifiedValueOrRetailPrice\": 0.0,\n      \"salesTaxApplicable\": 180.0,\n      \"salesTaxWithheldAtSource\": 0.0,\n      \"extraTax\": 0.0,\n      \"furtherTax\": 120.0,\n      \"sroScheduleNo\": \"\",\n      \"fedPayable\": 0.0,\n      \"discount\": 0.0,\n      \"saleType\": \"Goods at standard rate (default)\",\n      \"sroItemSerialNo\": \"\"\n    }\n  ]\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const vr = (pm.response.json().validationResponse) || {};",
+                  "pm.test('Header statusCode is 00', () => pm.expect(vr.statusCode, `header error ${vr.errorCode}: ${vr.error}`).to.eql('00'));",
+                  "pm.test('Every item statusCode is 00', () => {",
+                  "    const failed = (vr.invoiceStatuses || []).filter(i => i.statusCode !== '00').map(i => `item ${i.itemSNo}: ${i.errorCode} ${i.error}`);",
+                  "    pm.expect(failed, failed.join(' | ')).to.be.empty;",
+                  "});",
+                  "pm.test('FBR invoiceNumber returned', () => pm.expect(pm.response.json().invoiceNumber).to.be.a('string').and.not.empty);"
                 ]
               }
             }

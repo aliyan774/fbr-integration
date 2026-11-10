@@ -30,6 +30,7 @@ import httpx
 
 PLACEHOLDERS = {
     "REPLACE_WITH_API_KEY": "api_key",
+    "REPLACE_WITH_SANDBOX_VALIDATE_TOKEN": "validate_token",
     "REPLACE_WITH_SANDBOX_TOKEN": "token",
     "REPLACE_WITH_PRODUCTION_TOKEN": "prd_token",
 }
@@ -42,6 +43,9 @@ def main() -> int:
     ap.add_argument("--base-url", default=None, help="override the server, e.g. http://localhost:8003")
     ap.add_argument("--api-key", default="", help="X-API-Key value")
     ap.add_argument("--token", default="dummy-token", help="sandbox Bearer token (dev requests)")
+    ap.add_argument("--validate-token", default=None,
+                    help="portal 'Sandbox Security Token' for the direct validateinvoicedata_sb request (default: same as --token)")
+    ap.add_argument("--skip-direct", action="store_true", help="skip the 'PRAL direct' folder (calls gw.fbr.gov.pk without the middleware)")
     ap.add_argument("--prd-token", default="", help="production Bearer token (prd requests); skipped when empty")
     ap.add_argument("--erp", default=None, help="erpInvoiceNo to use (default: the collection's)")
     ap.add_argument("--only", default=None, help="run only requests whose name contains this text")
@@ -52,12 +56,15 @@ def main() -> int:
 
     col = json.loads(args.collection.read_text(encoding="utf-8"))
     variables = {v["key"]: v["value"] for v in col.get("variable", [])}
-    variables.update({"apiKey": args.api_key, "devToken": args.token, "prdToken": args.prd_token or "dummy-token"})
+    validate_token = args.validate_token or args.token
+    variables.update({"apiKey": args.api_key, "devToken": args.token, "devValidateToken": validate_token,
+                      "prdToken": args.prd_token or "dummy-token"})
     if args.base_url:
         variables["baseUrl"] = args.base_url
     if args.erp:
         variables["erpInvoiceNo"] = args.erp
-    literal = {"api_key": args.api_key, "token": args.token, "prd_token": args.prd_token or "dummy-token"}
+    literal = {"api_key": args.api_key, "token": args.token, "validate_token": validate_token,
+               "prd_token": args.prd_token or "dummy-token"}
 
     def sub(text: str) -> str:
         text = VAR_RE.sub(lambda m: variables.get(m.group(1), m.group(0)), text)
@@ -94,6 +101,9 @@ def main() -> int:
             name = f"{folder} / {item['name']}" if folder else item["name"]
             if args.only and args.only.lower() not in name.lower():
                 continue
+            if folder.startswith("PRAL direct") and args.skip_direct:
+                print(f"SKIP           {name}  (--skip-direct)")
+                continue
             if folder.startswith("prd") and not args.prd_token:
                 print(f"SKIP           {name}  (no --prd-token)")
                 continue
@@ -126,6 +136,16 @@ def main() -> int:
                         status += f"  pralFault={fault.get('code')} {fault.get('message')}"
                     if isinstance(j.get("detail"), list) and j["detail"]:
                         status += "  field=" + ",".join(str(d.get("field")) for d in j["detail"] if isinstance(d, dict))
+                    # a direct PRAL answer has no envelope: read its validationResponse / fault
+                    vr = j.get("validationResponse") if isinstance(j.get("validationResponse"), dict) else None
+                    if vr and "status" not in j:
+                        status = f"PRAL statusCode={vr.get('statusCode')}"
+                        if vr.get("errorCode"):
+                            status += f" errorCode={vr.get('errorCode')}"
+                        if j.get("invoiceNumber"):
+                            status += f"  invoiceNumber={j['invoiceNumber']}"
+                    elif isinstance(j.get("fault"), dict):
+                        status = f"pralFault={j['fault'].get('code')} {j['fault'].get('message')}"
                     if isinstance(j.get("provinces"), list):
                         status += f"  provinces={len(j['provinces'])}"
                     if (not ok and args.no_token_yet and resp.status_code in (200, 502)
