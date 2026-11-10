@@ -114,7 +114,20 @@ def main() -> int:
             try:
                 j = resp.json()
                 if isinstance(j, dict):
-                    status = j.get("status") or (j.get("detail") if isinstance(j.get("detail"), str) else "")
+                    status = (j.get("status") or j.get("tokenStatus")
+                              or (j.get("detail") if isinstance(j.get("detail"), str) else "")) or ""
+                    # what PRAL said: error codes from validationResponse, or the gateway fault
+                    pral = j.get("pralResponse") if isinstance(j.get("pralResponse"), dict) else {}
+                    codes = [d.get("code") for d in j.get("errorDescriptions") or [] if isinstance(d, dict)]
+                    fault = pral.get("fault") if isinstance(pral.get("fault"), dict) else None
+                    if codes:
+                        status += f"  pralError={','.join(str(c) for c in codes)}"
+                    elif fault:
+                        status += f"  pralFault={fault.get('code')} {fault.get('message')}"
+                    if isinstance(j.get("detail"), list) and j["detail"]:
+                        status += "  field=" + ",".join(str(d.get("field")) for d in j["detail"] if isinstance(d, dict))
+                    if isinstance(j.get("provinces"), list):
+                        status += f"  provinces={len(j['provinces'])}"
                     if (not ok and args.no_token_yet and resp.status_code in (200, 502)
                             and j.get("status") == "AUTH_ERROR" and j.get("pralHttpStatus") == 401):
                         ok = True
