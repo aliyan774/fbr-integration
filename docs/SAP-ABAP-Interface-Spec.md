@@ -113,8 +113,23 @@ The body is a JSON envelope around the PRAL payload. Every field below is checke
 | `discount` | number | optional | default `0.00` |
 | `sroScheduleNo` | string | optional | default `""`; PRAL requires it for SRO-based sale types (its error 0077) |
 | `sroItemSerialNo` | string | optional | default `""`; PRAL requires it for SRO-based sale types (its error 0078) |
+| `petroleumLevyOn` | number or string | conditional | Not in PRAL spec v1.12. PRAL requires it when `saleType` is `Petroleum Products` (its error 0129 when missing). Forwarded to PRAL exactly as sent, and only when sent. PRAL has not published the accepted values; see 3.4 |
 
 Numbers are JSON numbers, not quoted strings. Optional fields may be omitted; the middleware always forwards them to PRAL with their defaults.
+
+### 3.4 Findings from the first real sandbox calls (PRL, billing document 61000009, 2026-11-23)
+
+Tested with PRL's seller NTN and the sandbox token, HSD (HS `2710.1931`) sold to PSO:
+
+| Finding | Evidence | What SAP must do |
+| --- | --- | --- |
+| `scenarioId` and `saleType` must belong together | `SN006` with `saleType: "Petroleum Products"` is rejected with 0204 "Sale type not match with provided scenario No. SN006". `SN006` with `saleType: "Exempt goods"` validates | send the sale type of the scenario under test: `SN006` = `Exempt goods`, `SN012` = `Petroleum Products` (table in the PRAL spec section 9). In production there is no scenario and the real sale type is sent |
+| Petroleum Products needs `petroleumLevyOn` | without it: 0129 "Petroleum Levy On field cannot be empty or null" | add the field to the item for petroleum sale types |
+| The accepted value of `petroleumLevyOn` is not known | with any value tried (number, quantity in litres, text) PRAL answers "Please Provide Petroleum Levy on" with no error code in about 9 calls out of 10, and Valid in the tenth | ask PRAL support for the definition and a sample payload for scenario SN012 before building this mapping |
+| The sandbox is not deterministic | an invoice that validates is rejected about 1 time in 10 with an unrelated code (0090, 0099, 0077 seen), and validates again on the next call | on an unexpected rejection in the sandbox, run Validate once more before changing data |
+| PRL's master data is right | PRAL's reference APIs list `Liter` as the unit for HS `2710.1931` and `Exempt` as a rate for Petroleum Products | nothing to change in unit, rate or HS code |
+
+Error codes 0129 and 0204 are newer than the v1.12 catalogue; for such codes, and for PRAL errors that carry no code, `errorDescriptions` carries PRAL's own error text.
 
 ## 4. Sample payloads
 

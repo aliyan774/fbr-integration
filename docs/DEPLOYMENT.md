@@ -486,6 +486,12 @@ adapter as Public the rule is inactive for everyone. Fix with
 **Check the reverse proxy points where you think.** Restarting the service while testing through
 IIS can mean restarting one instance and testing another.
 
+**The PRAL sandbox is not deterministic.** The same request that validates is rejected about one
+time in ten with an unrelated error (0090, 0099, 0077 seen on 2026-11-23) and validates again on the
+next call. Before changing data because of a sandbox rejection, run the validate once more. Scenario
+SN012 (Petroleum Products) fails nine times in ten with "Please Provide Petroleum Levy on" whatever
+`petroleumLevyOn` contains; that one needs PRAL support, see the ABAP spec section 3.4.
+
 **PRAL sends malformed JSON for header-level rejections.** HTTP 200, `statusCode 01`, and a trailing
 comma before the closing brace, which a strict parser refuses. Before 2026-11-23 the middleware then
 answered `REJECTED_FBR` with `pralResponse: null` and no error description, which is what SAP showed

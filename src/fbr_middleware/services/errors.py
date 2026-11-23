@@ -123,5 +123,37 @@ def error_codes_in(pral_body: object) -> list[str]:
     return codes
 
 
+def _pral_errors(pral_body: object) -> list[tuple[str, str]]:
+    """(errorCode, error text) for the header and every item that carries either, in order."""
+    found: list[tuple[str, str]] = []
+    if not isinstance(pral_body, dict):
+        return found
+    vr = pral_body.get("validationResponse")
+    if not isinstance(vr, dict):
+        return found
+    entries = [vr] + [s for s in vr.get("invoiceStatuses") or [] if isinstance(s, dict)]
+    for e in entries:
+        code = str(e.get("errorCode") or "").strip()
+        text = str(e.get("error") or "").strip()
+        if (code or text) and (code, text) not in found:
+            found.append((code, text))
+    return found
+
+
 def descriptions_for(pral_body: object) -> list[ErrorDescription]:
-    return [ErrorDescription(code=c, description=describe(c)) for c in error_codes_in(pral_body)]
+    """One entry per PRAL error.
+
+    The description is the spec's BRIEF_MSG_DESC when the code is in the v1.12 catalogue. PRAL now
+    sends codes newer than that catalogue (0129, 0204 ...) and some errors with no code at all
+    ("Please Provide Petroleum Levy on"); for those PRAL's own error text is used, so SAP never
+    shows an empty or "not listed" message.
+    """
+    out: list[ErrorDescription] = []
+    seen: set[str] = set()
+    for code, text in _pral_errors(pral_body):
+        key = code or text
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(ErrorDescription(code=code, description=ERROR_CATALOGUE.get(code) or text or UNKNOWN_DESCRIPTION))
+    return out

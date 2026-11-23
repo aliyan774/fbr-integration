@@ -83,6 +83,10 @@ class InvoiceItem(BaseModel):
     discount: Decimal = Field(default=ZERO, ge=0, decimal_places=2)
     sroScheduleNo: str = ""
     sroItemSerialNo: str = ""
+    #: Not in spec v1.12. PRAL requires it for saleType "Petroleum Products" (its error 0129 when
+    #: missing). PRAL has not documented the accepted values, so it is forwarded exactly as SAP
+    #: sends it (number or string) and only when SAP sends it.
+    petroleumLevyOn: Decimal | str | None = None
 
     @field_validator("productDescription", "rate", "uoM", "saleType")
     @classmethod
@@ -102,6 +106,12 @@ class InvoiceItem(BaseModel):
     def to_pral_dict(self) -> dict[str, Any]:
         """Key order and quantisation as in the PRAL samples. Every optional key is emitted."""
         q2 = lambda d: d.quantize(TWO_PLACES, rounding=ROUND_HALF_UP)  # noqa: E731
+        d = self._base_pral_dict(q2)
+        if self.petroleumLevyOn is not None:
+            d["petroleumLevyOn"] = self.petroleumLevyOn  # verbatim: PRAL's format is undocumented
+        return d
+
+    def _base_pral_dict(self, q2: Any) -> dict[str, Any]:
         return {
             "hsCode": self.hsCode,
             "productDescription": self.productDescription,
