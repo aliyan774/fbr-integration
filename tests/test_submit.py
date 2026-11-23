@@ -51,8 +51,9 @@ async def test_happy_path_returns_201_with_pral_body_verbatim(client, pral, vali
     assert set(body) == {
         "trackingId", "environment", "erpInvoiceNo", "sellerNtn", "callbackRef", "status", "replayed", "fbrInvoiceNo",
         "dated", "pralHttpStatus", "pralResponse", "localErrors", "errorDescriptions", "attempts",
-        "receivedAt", "completedAt", "elapsedMs",
+        "receivedAt", "completedAt", "elapsedMs", "pralRawBody",
     }
+    assert body["pralRawBody"] is None  # only set when PRAL's body is not a JSON object
 
     # Both PRAL calls carry the SAP-supplied bearer and the same body
     assert v.call_count == 1 and p.call_count == 1

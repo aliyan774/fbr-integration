@@ -32,7 +32,7 @@ from typing import Any
 
 import uvicorn
 from fastapi import FastAPI, Header, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 app = FastAPI(title="Mock PRAL DI gateway", version="1.12-mock")
 
@@ -93,23 +93,19 @@ async def _handle(request: Request, authorization: str | None, issue_number: boo
             },
         )
 
-    # Header-level rejection (spec sample): any item without hsCode, or the 9999.9999 trigger
+    # Header-level rejection (spec sample): any item without hsCode, or the 9999.9999 trigger.
+    # The real gateway answers these with MALFORMED JSON: a trailing comma before the closing
+    # brace (seen 2026-11-23). The mock reproduces it byte for byte so clients are tested on it.
     if not items or any(
         str(i.get("hsCode", "")).strip() in ("", "9999.9999") for i in items if isinstance(i, dict)
     ):
-        return JSONResponse(
-            status_code=200,
-            content={
-                "dated": _now(),
-                "validationResponse": {
-                    "statusCode": "01",
-                    "status": "Invalid",
-                    "errorCode": "0052",
-                    "error": "Provide proper HS Code with invoice no. null",
-                    "invoiceStatuses": None,
-                },
-            },
+        text = (
+            '{\n\t\t\t\t\t\t\t"dated": "' + _now() + '",\n\t\t\t\t\t\t\t"validationResponse": '
+            '{"statusCode":"01","status":"Invalid","errorCode":"0052",'
+            '"error":"Provide proper HS Code with invoice no. null","invoiceStatuses":null},'
+            '\n\t\t\t\t\t\t\t"sourceInvoiceNo":"",\n\t\t\t\t\t\t\t}'
         )
+        return Response(content=text, status_code=200, media_type="application/json")
 
     seller = str(body.get("sellerNTNCNIC", "0000000"))
     invoice_number = f"{seller}DI{int(time.time() * 1000)}" if issue_number else None

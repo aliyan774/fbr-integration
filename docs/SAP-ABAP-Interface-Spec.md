@@ -309,6 +309,7 @@ Every processed submission, and every GET, returns the same envelope. The HTTP c
 | `attempts` | integer | always | PRAL calls made for this document, cumulative over resubmissions |
 | `receivedAt`, `completedAt` | ISO datetime (UTC) | always | |
 | `elapsedMs` | integer | always | |
+| `pralRawBody` | string or null | only when PRAL's body is not a JSON object | first 4000 characters of what PRAL sent (HTML error page, empty, garbage). `null` in every normal case. With it, `status` is `FAILED_UPSTREAM` after validate (safe to resubmit) or `UNKNOWN` after post (a number may exist; do not resubmit) |
 
 ### 6.2 Status to HTTP code and SAP action
 
@@ -389,7 +390,7 @@ Every processed submission, and every GET, returns the same envelope. The HTTP c
 }
 ```
 
-Other envelope fields are present as in 6.3. A header-level rejection has `validationResponse.statusCode: "01"`, its `errorCode` set and `invoiceStatuses: null`. Success in PRAL terms is header `statusCode == "00"` and every item `statusCode == "00"`; the `status` text varies in case and must not be compared.
+Other envelope fields are present as in 6.3. A header-level rejection has `validationResponse.statusCode: "01"`, its `errorCode` set and `invoiceStatuses: null`. PRAL's gateway sends these header-level rejections as malformed JSON, with a trailing comma before the closing brace (observed 2026-11-23). The middleware repairs that before answering, so SAP always receives valid JSON with the `errorCode` and its text in `errorDescriptions`; an ABAP client that ever calls PRAL directly must do the same repair. Success in PRAL terms is header `statusCode == "00"` and every item `statusCode == "00"`; the `status` text varies in case and must not be compared.
 
 ### 6.5 Shape violation, HTTP 422, nothing stored
 

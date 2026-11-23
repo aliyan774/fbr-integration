@@ -105,6 +105,8 @@ class InvoiceEnvelope(BaseModel):
     receivedAt: datetime
     completedAt: datetime
     elapsedMs: int
+    #: PRAL's body as text, only when it could not be read as a JSON object (first 4000 chars).
+    pralRawBody: str | None = None
 
     @property
     def http_status(self) -> int:

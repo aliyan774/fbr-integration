@@ -46,6 +46,12 @@ class PralResult:
     body: Any | None  # parsed JSON, or None if the body was not JSON
     text: str
     latency_ms: int
+    repaired: bool = False  # True when PRAL's body was malformed JSON that had to be repaired
+
+    @property
+    def readable(self) -> bool:
+        """PRAL answered with a JSON object we can interpret."""
+        return isinstance(self.body, dict)
 
     @property
     def validation(self) -> dict[str, Any] | None:
@@ -235,11 +241,65 @@ def _exc_text(exc: Exception) -> str:
     return f"{type(exc).__name__}: {exc}"
 
 
+def strip_trailing_commas(text: str) -> str:
+    """Remove commas that directly precede ``}`` or ``]`` outside of strings.
+
+    PRAL's gateway builds some answers by hand and leaves a trailing comma, e.g. header-level
+    rejections end with ``"sourceInvoiceNo":"",\n}`` (seen on the sandbox, 2026-11-23).
+    """
+    out: list[str] = []
+    in_string = False
+    escaped = False
+    i, n = 0, len(text)
+    while i < n:
+        ch = text[i]
+        if in_string:
+            out.append(ch)
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+        elif ch == '"':
+            in_string = True
+            out.append(ch)
+        elif ch == ",":
+            j = i + 1
+            while j < n and text[j] in " \t\r\n":
+                j += 1
+            if j < n and text[j] in "}]":
+                pass  # drop the trailing comma
+            else:
+                out.append(ch)
+        else:
+            out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def loads_lenient(text: str) -> tuple[Any | None, bool]:
+    """Parse PRAL's body. Returns (value, repaired). value is None when it is not JSON at all."""
+    if not text or not text.strip():
+        return None, False
+    try:
+        return json.loads(text), False
+    except ValueError:
+        pass
+    try:
+        # strict=False also accepts raw tabs / newlines inside strings
+        return json.loads(strip_trailing_commas(text), strict=False), True
+    except ValueError:
+        return None, False
+
+
 def _to_result(call: str, url: str, resp: httpx.Response, latency_ms: int) -> PralResult:
     text = resp.text
-    body: Any | None
-    try:
-        body = json.loads(text) if text else None
-    except ValueError:
-        body = None
-    return PralResult(call=call, url=url, http_status=resp.status_code, body=body, text=text, latency_ms=latency_ms)
+    body, repaired = loads_lenient(text)
+    if repaired:
+        log.warning("PRAL %s answered HTTP %d with malformed JSON (repaired)", call, resp.status_code)
+    elif body is None and text.strip():
+        log.warning("PRAL %s answered HTTP %d with a non-JSON body: %.500s", call, resp.status_code, text)
+    return PralResult(
+        call=call, url=url, http_status=resp.status_code, body=body, text=text, latency_ms=latency_ms, repaired=repaired
+    )

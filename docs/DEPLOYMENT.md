@@ -486,6 +486,13 @@ adapter as Public the rule is inactive for everyone. Fix with
 **Check the reverse proxy points where you think.** Restarting the service while testing through
 IIS can mean restarting one instance and testing another.
 
+**PRAL sends malformed JSON for header-level rejections.** HTTP 200, `statusCode 01`, and a trailing
+comma before the closing brace, which a strict parser refuses. Before 2026-11-23 the middleware then
+answered `REJECTED_FBR` with `pralResponse: null` and no error description, which is what SAP showed
+for billing document 61000009. The client now repairs the body (`loads_lenient` in `clients\pral.py`)
+and logs `answered HTTP 200 with malformed JSON (repaired)`. A body that is not JSON at all comes back
+in `pralRawBody` with `FAILED_UPSTREAM` (validate) or `UNKNOWN` (post), never as a silent rejection.
+
 **Every submission ends `FAILED_UPSTREAM`.** No outbound route to `gw.fbr.gov.pk`: proxy variables
 missing from the service environment, firewall, or DNS. `Invoke-WebRequest https://gw.fbr.gov.pk -UseBasicParsing`
 from the server (any HTTP answer, even 404, proves the route).

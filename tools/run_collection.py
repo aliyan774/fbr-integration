@@ -122,7 +122,14 @@ def main() -> int:
             status = ""
             note = ""
             try:
-                j = resp.json()
+                try:
+                    j = resp.json()
+                except ValueError:
+                    from fbr_middleware.clients.pral import loads_lenient  # PRAL's malformed JSON
+                    j, _ = loads_lenient(resp.text)
+                    if j is None:
+                        raise
+                    note += "  [PRAL sent malformed JSON]"
                 if isinstance(j, dict):
                     status = (j.get("status") or j.get("tokenStatus")
                               or (j.get("detail") if isinstance(j.get("detail"), str) else "")) or ""

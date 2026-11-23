@@ -50,6 +50,16 @@ def _aware(dt: datetime | None) -> datetime | None:
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
+RAW_BODY_LIMIT = 4000
+
+
+def raw_body_of(result: PralResult | None) -> str | None:
+    """PRAL's body as text when it is not a JSON object (HTML error page, empty, garbage)."""
+    if result is None or result.readable:
+        return None
+    return (result.text or "")[:RAW_BODY_LIMIT]
+
+
 def envelope_from_row(row: Invoice, replayed: bool) -> InvoiceEnvelope:
     status = SubmissionStatus(row.status) if row.status != STATUS_RECEIVED else SubmissionStatus.UNKNOWN
     received = _aware(row.received_at) or _utcnow()
@@ -116,11 +126,13 @@ class SubmissionService:
                 try:
                     result = await self.pral.validate_invoice(env, payload_json, token, attempts)
                     parsed = PralResponse.try_parse(result.body)
-                    status = (
-                        SubmissionStatus.VALIDATED
-                        if parsed is not None and parsed.is_success()
-                        else SubmissionStatus.REJECTED_FBR
-                    )
+                    if not result.readable or parsed is None:
+                        # HTTP 200 but no JSON object: PRAL's fault, not a data rejection
+                        status = SubmissionStatus.FAILED_UPSTREAM
+                    elif parsed.is_success():
+                        status = SubmissionStatus.VALIDATED
+                    else:
+                        status = SubmissionStatus.REJECTED_FBR
                 except AuthError as exc:
                     status, result = SubmissionStatus.AUTH_ERROR, exc.result
                 except UpstreamError as exc:
@@ -148,6 +160,7 @@ class SubmissionService:
             receivedAt=received_at,
             completedAt=completed_at,
             elapsedMs=int((time.perf_counter() - t0) * 1000),
+            pralRawBody=raw_body_of(result),
         )
         return SubmitResult(envelope, envelope.http_status)
 
@@ -213,12 +226,18 @@ class SubmissionService:
             try:
                 result = await self.pral.validate_invoice(env, payload_json, token, attempts)
                 parsed = PralResponse.try_parse(result.body)
-                if parsed is None or not parsed.is_success():
+                if not result.readable or parsed is None:
+                    # HTTP 200 but no JSON object from validate: nothing was created, safe to resubmit
+                    status = SubmissionStatus.FAILED_UPSTREAM
+                elif not parsed.is_success():
                     status = SubmissionStatus.REJECTED_FBR
                 else:
                     result = await self.pral.post_invoice(env, payload_json, token, attempts)
                     parsed = PralResponse.try_parse(result.body)
-                    if parsed is not None and parsed.is_success() and parsed.invoiceNumber:
+                    if not result.readable or parsed is None:
+                        # post was sent and PRAL's answer cannot be read: a number may exist
+                        status = SubmissionStatus.UNKNOWN
+                    elif parsed.is_success() and parsed.invoiceNumber:
                         status = SubmissionStatus.SUBMITTED
                     else:
                         status = SubmissionStatus.REJECTED_FBR
@@ -288,4 +307,5 @@ class SubmissionService:
                 )
             await session.commit()
             envelope = envelope_from_row(row, replayed=False)
+        envelope.pralRawBody = raw_body_of(result)
         return SubmitResult(envelope, envelope.http_status)
